@@ -1,0 +1,20 @@
+services:
+  api:
+    build: ./backend
+    container_name: dooh-inventory-api
+    ports:
+      - "8080:8080"
+    environment:
+      - IMPROVE_API_BASE_URL=https://api.360yield.com
+      - IMPROVE_CLIENT_ID=${IMPROVE_CLIENT_ID}
+      - IMPROVE_CLIENT_SECRET=${IMPROVE_CLIENT_SECRET}
+      - FRONTEND_ORIGIN=http://localhost:3000
+      - PORT=8080
+
+  ui:
+    build: ./frontend
+    container_name: dooh-inventory-ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
