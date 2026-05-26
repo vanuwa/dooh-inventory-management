@@ -128,7 +128,7 @@ export default function Publishers() {
                       style={i % 2 !== 0 ? s.rowAlt : s.row}
                       onClick={() => navigate('/publishers/' + pub.id, { state: { publisher: pub } })}
                     >
-                      <td style={s.td}><span style={s.idTag}>#{pub.id}</span></td>
+                      <td style={s.td}><span style={s.idTag}>{pub.id}</span></td>
                       <td style={s.td}>{pub.name}</td>
                       <td style={s.td}>{pub.business_unit_name || '—'}</td>
                       <td style={s.td}><BusinessTypeBadge owned={pub.azerion_owned} /></td>

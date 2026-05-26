@@ -65,7 +65,7 @@ export default function PublisherDetail() {
           <div style={s.card}>
             <div style={s.cardHeader}>
               <h2 style={s.cardTitle}>{publisher.name}</h2>
-              <span style={s.cardId}>#{id}</span>
+              <span style={s.cardId}>{id}</span>
             </div>
             <div style={s.cardBody}>
               {publisher.active !== undefined && (
@@ -135,7 +135,7 @@ export default function PublisherDetail() {
                     <tbody>
                       {visiblePlacements.map((pl, i) => (
                         <tr key={pl.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
-                          <td style={s.td}><span style={s.idTag}>#{pl.id}</span></td>
+                          <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
                           <td style={s.td}>{pl.name}</td>
                           <td style={s.td}>{pl.type || '—'}</td>
                           <td style={s.td}><StatusBadge active={pl.placement_status} /></td>
