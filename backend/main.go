@@ -19,10 +19,12 @@ func main() {
 func newHandler(cfg *config.Config) http.Handler {
 	authHandler := handlers.NewAuthHandler(cfg)
 	proxyHandler := handlers.NewProxyHandler(cfg)
+	placementsHandler := handlers.NewPlacementsHandler(cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.HandleFunc("/api/user/details", proxyHandler.UserDetails)
+	mux.HandleFunc("/api/placements", placementsHandler.Placements)
 
 	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
 }

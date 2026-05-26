@@ -31,31 +31,18 @@ func (h *ProxyHandler) proxy(w http.ResponseWriter, r *http.Request, method, ups
 	accessToken := r.Header.Get("X-Access-Token")
 	refreshToken := r.Header.Get("X-Refresh-Token")
 
-	body, status, contentType, err := h.doRequest(method, upstreamPath, accessToken)
+	body, status, contentType, err := doRequest(h.cfg.ImproveAPIBaseURL, method, upstreamPath, accessToken)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
-		params := url.Values{}
-		params.Set("grant_type", "refresh_token")
-		params.Set("refresh_token", refreshToken)
-
-		newTokens, err := fetchToken(h.cfg.ImproveAPIBaseURL, h.cfg.ImproveClientID, h.cfg.ImproveClientSecret, params)
-		if err != nil {
-			w.WriteHeader(http.StatusUnauthorized)
+		var ok bool
+		body, status, contentType, _, ok = refreshAndRetry(h.cfg, w, method, upstreamPath, refreshToken)
+		if !ok {
 			return
 		}
-
-		body, status, contentType, err = h.doRequest(method, upstreamPath, newTokens.AccessToken)
-		if err != nil {
-			http.Error(w, "upstream request failed after token refresh", http.StatusBadGateway)
-			return
-		}
-
-		w.Header().Set("X-New-Access-Token", newTokens.AccessToken)
-		w.Header().Set("X-New-Refresh-Token", newTokens.RefreshToken)
 	}
 
 	if contentType != "" {
@@ -65,12 +52,38 @@ func (h *ProxyHandler) proxy(w http.ResponseWriter, r *http.Request, method, ups
 	w.Write(body)
 }
 
-func (h *ProxyHandler) doRequest(method, path, accessToken string) ([]byte, int, string, error) {
-	req, err := http.NewRequest(method, h.cfg.ImproveAPIBaseURL+path, nil)
+// refreshAndRetry refreshes the OAuth token and retries the request.
+// Sets X-New-Access-Token / X-New-Refresh-Token on w if successful.
+// Returns (body, status, contentType, newAccessToken, ok); ok=false means a response was already written.
+func refreshAndRetry(cfg *config.Config, w http.ResponseWriter, method, path, refreshToken string) ([]byte, int, string, string, bool) {
+	params := url.Values{}
+	params.Set("grant_type", "refresh_token")
+	params.Set("refresh_token", refreshToken)
+
+	newTokens, err := fetchToken(cfg.ImproveAPIBaseURL, cfg.ImproveClientID, cfg.ImproveClientSecret, params)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return nil, 0, "", "", false
+	}
+
+	body, status, contentType, err := doRequest(cfg.ImproveAPIBaseURL, method, path, newTokens.AccessToken)
+	if err != nil {
+		http.Error(w, "upstream request failed after token refresh", http.StatusBadGateway)
+		return nil, 0, "", "", false
+	}
+
+	w.Header().Set("X-New-Access-Token", newTokens.AccessToken)
+	w.Header().Set("X-New-Refresh-Token", newTokens.RefreshToken)
+	return body, status, contentType, newTokens.AccessToken, true
+}
+
+func doRequest(baseURL, method, path, accessToken string) ([]byte, int, string, error) {
+	req, err := http.NewRequest(method, baseURL+path, nil)
 	if err != nil {
 		return nil, 0, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

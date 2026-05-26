@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
+import Placements from './pages/Placements.jsx'
 
 export default function App() {
   return (
@@ -15,6 +16,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/placements"
+            element={
+              <ProtectedRoute>
+                <Placements />
               </ProtectedRoute>
             }
           />
