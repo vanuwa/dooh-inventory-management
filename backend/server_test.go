@@ -254,31 +254,31 @@ func TestUserDetails_RefreshFails_Returns401(t *testing.T) {
 	}
 }
 
-// --- Placements ---
+// --- Publishers ---
 
 const (
-	mockPublishersBody = `{"publishers":[{"id":42,"name":"Pub One","active":true}],"totalNumberOfElemements":1}`
-	mockPlacementsBody = `{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true},{"id":102,"name":"Screen B","placement_status":false}]}`
+	mockPublisherListBody = `{"publishers":[{"id":42,"name":"Pub One","active":true,"business_unit_name":"Test BU","seller_type":"PUBLISHER","azerion_owned":false}],"totalNumberOfElemements":1}`
+	mockPublisherItemBody = `{"id":42,"name":"Pub One"}`
+	mockPubPlacementsBody = `{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"type":"display"},{"id":102,"name":"Screen B","placement_status":false,"type":"video"}]}`
 )
 
-func TestPlacements_Success(t *testing.T) {
+func TestPublishers_Success(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/admin/v1/publishers": func(w http.ResponseWriter, r *http.Request) {
 			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
 				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
 			}
+			if got := r.URL.Query().Get("sort"); got != "-id" {
+				t.Errorf("sort: want %q, got %q", "-id", got)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockPublishersBody))
-		},
-		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockPlacementsBody))
+			w.Write([]byte(mockPublisherListBody))
 		},
 	})
 
 	app := appServer(t, upstream.URL)
 
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/placements", nil)
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
 	req.Header.Set("X-Access-Token", "mock-access-token")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -292,41 +292,91 @@ func TestPlacements_Success(t *testing.T) {
 	}
 
 	var body struct {
-		Rows            []map[string]any `json:"rows"`
-		TotalPublishers int              `json:"total_publishers"`
-		Page            int              `json:"page"`
-		Limit           int              `json:"limit"`
+		Publishers []map[string]any `json:"publishers"`
+		Total      int              `json:"total"`
+		Page       int              `json:"page"`
+		Limit      int              `json:"limit"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Rows) != 2 {
-		t.Errorf("rows: want 2, got %d", len(body.Rows))
+	if len(body.Publishers) != 1 {
+		t.Errorf("publishers: want 1, got %d", len(body.Publishers))
 	}
-	if body.TotalPublishers != 1 {
-		t.Errorf("total_publishers: want 1, got %d", body.TotalPublishers)
+	if body.Total != 1 {
+		t.Errorf("total: want 1, got %d", body.Total)
 	}
 	if body.Page != 1 {
 		t.Errorf("page: want 1, got %d", body.Page)
 	}
 }
 
-func TestPlacements_TokenRefreshOnExpiry(t *testing.T) {
-	publisherCallCount := 0
-
+func TestPublishers_SearchPassthrough(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/admin/v1/publishers": func(w http.ResponseWriter, r *http.Request) {
-			publisherCallCount++
-			if publisherCallCount == 1 {
+			if got := r.URL.Query().Get("search"); got != "test pub" {
+				t.Errorf("search: want %q, got %q", "test pub", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherListBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers?search=test+pub", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestPublishers_ActivePassthrough(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("active"); got != "false" {
+				t.Errorf("active: want %q, got %q", "false", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherListBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers?active=false", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestPublishers_TokenRefresh(t *testing.T) {
+	callCount := 0
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockPublishersBody))
-		},
-		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockPlacementsBody))
+			w.Write([]byte(mockPublisherListBody))
 		},
 		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -336,7 +386,7 @@ func TestPlacements_TokenRefreshOnExpiry(t *testing.T) {
 
 	app := appServer(t, upstream.URL)
 
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/placements", nil)
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
 	req.Header.Set("X-Access-Token", "expired-token")
 	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
 
@@ -357,7 +407,7 @@ func TestPlacements_TokenRefreshOnExpiry(t *testing.T) {
 	}
 }
 
-func TestPlacements_RefreshFails_Returns401(t *testing.T) {
+func TestPublishers_RefreshFails_Returns401(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -369,7 +419,7 @@ func TestPlacements_RefreshFails_Returns401(t *testing.T) {
 
 	app := appServer(t, upstream.URL)
 
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/placements", nil)
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
 	req.Header.Set("X-Access-Token", "expired-token")
 	req.Header.Set("X-Refresh-Token", "expired-refresh-token")
 
@@ -381,6 +431,120 @@ func TestPlacements_RefreshFails_Returns401(t *testing.T) {
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status: want 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestPublisherDetail_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers/42": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
+				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherItemBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["name"] != "Pub One" {
+		t.Errorf("name: want %q, got %v", "Pub One", body["name"])
+	}
+}
+
+func TestPublisherPlacements_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
+				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPubPlacementsBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Placements []map[string]any `json:"placements"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Placements) != 2 {
+		t.Errorf("placements: want 2, got %d", len(body.Placements))
+	}
+}
+
+func TestPublisherPlacements_TokenRefresh(t *testing.T) {
+	callCount := 0
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPubPlacementsBody))
+		},
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements", nil)
+	req.Header.Set("X-Access-Token", "expired-token")
+	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
+		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
+	}
+	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
+		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
 	}
 }
 

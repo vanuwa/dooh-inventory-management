@@ -3,7 +3,8 @@ import { AuthProvider } from './context/AuthContext.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
-import Placements from './pages/Placements.jsx'
+import Publishers from './pages/Publishers.jsx'
+import PublisherDetail from './pages/PublisherDetail.jsx'
 
 export default function App() {
   return (
@@ -20,14 +21,22 @@ export default function App() {
             }
           />
           <Route
-            path="/placements"
+            path="/publishers"
             element={
               <ProtectedRoute>
-                <Placements />
+                <Publishers />
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route
+            path="/publishers/:id"
+            element={
+              <ProtectedRoute>
+                <PublisherDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/publishers" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

@@ -29,7 +29,7 @@ export default function Layout({ user, children }) {
         <div style={s.headerLeft}>
           <span style={s.headerTitle}>DOOH Inventory Management</span>
           <nav style={s.nav}>
-            <Link to="/placements" style={s.navLink}>Placements</Link>
+            <Link to="/publishers" style={s.navLink}>Publishers</Link>
           </nav>
         </div>
         <div style={s.headerRight}>
