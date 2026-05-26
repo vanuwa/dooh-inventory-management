@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"dooh-backend/config"
 )
@@ -47,12 +48,81 @@ type publisherPlacementsResponse struct {
 	Placements []PublisherPlacement `json:"placements"`
 }
 
+type PlacementDoohItem struct {
+	ID                int64   `json:"id"`
+	PublisherID       int64   `json:"publisher_id"`
+	PlacementID       int64   `json:"placement_id"`
+	PlayerID          string  `json:"player_id"`
+	DeviceID          string  `json:"device_id"`
+	ScreenImgURL      string  `json:"screen_img_url"`
+	Orientation       string  `json:"orientation"`
+	ResolutionWidth   int32   `json:"resolution_width"`
+	ResolutionHeight  int32   `json:"resolution_height"`
+	VenueTypeID       int32   `json:"venue_type_id"`
+	VenueTypeTax      string  `json:"venue_type_tax"`
+	Lat               float64 `json:"lat"`
+	Lon               float64 `json:"lon"`
+	CountryCode       string  `json:"country_code"`
+	Region            string  `json:"region"`
+	City              string  `json:"city"`
+	Zip               string  `json:"zip"`
+	Address           string  `json:"address"`
+	Width             int32   `json:"width"`
+	Height            int32   `json:"height"`
+	MinDuration       int32   `json:"min_duration"`
+	MaxDuration       int32   `json:"max_duration"`
+	AvgWeeklyAudience float64 `json:"avg_weekly_audience"`
+	CPM               float64 `json:"cpm"`
+	CurrencyCode      string  `json:"currency_code"`
+	AllowedContent    string  `json:"allowed_content"`
+}
+
+type placementDoohsWrapper struct {
+	DoohSettings            []PlacementDoohItem `json:"dooh_settings"`
+	TotalNumberOfElemements int64               `json:"totalNumberOfElemements"`
+}
+
+type placementDoohsResponse struct {
+	DoohSettings []PlacementDoohItem `json:"dooh_settings"`
+	Total        int64               `json:"total"`
+	Page         int                 `json:"page"`
+	Limit        int                 `json:"limit"`
+}
+
 type PublishersHandler struct {
 	cfg *config.Config
 }
 
 func NewPublishersHandler(cfg *config.Config) *PublishersHandler {
 	return &PublishersHandler{cfg: cfg}
+}
+
+// parseX360ContentRange extracts the total count from the x-360-content-range header
+// value like "0 | 10 | 868" (offset | returned | total). Returns 0 if absent or malformed.
+func parseX360ContentRange(cr string) int64 {
+	parts := strings.Split(cr, "|")
+	if len(parts) != 3 {
+		return 0
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func parsePage(q url.Values) (page, limit, offset int) {
+	page, limit = 1, 20
+	if n, err := strconv.Atoi(q.Get("page")); err == nil && n > 0 {
+		page = n
+	}
+	if n, err := strconv.Atoi(q.Get("limit")); err == nil && n > 0 {
+		limit = n
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return page, limit, (page - 1) * limit
 }
 
 func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
@@ -64,21 +134,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 	accessToken := r.Header.Get("X-Access-Token")
 	refreshToken := r.Header.Get("X-Refresh-Token")
 
-	page, limit := 1, 20
-	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-		}
-	}
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	offset := (page - 1) * limit
+	page, limit, offset := parsePage(r.URL.Query())
 
 	params := url.Values{}
 	params.Set("limit", strconv.Itoa(limit))
@@ -94,7 +150,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 
 	upstreamPath := "/admin/v1/publishers?" + params.Encode()
 
-	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken)
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -102,7 +158,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		body, status, _, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, upstreamPath, refreshToken)
+		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, upstreamPath, refreshToken)
 		if !ok {
 			return
 		}
@@ -119,10 +175,15 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	total := wrapper.TotalNumberOfElemements
+	if total == 0 {
+		total = int(parseX360ContentRange(upHeaders.Get("X-360-Content-Range")))
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(publishersListResponse{
 		Publishers: wrapper.Publishers,
-		Total:      wrapper.TotalNumberOfElemements,
+		Total:      total,
 		Page:       page,
 		Limit:      limit,
 	})
@@ -140,7 +201,7 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 
 	path := "/admin/v1/publishers/" + id
 
-	body, status, contentType, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken)
+	body, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -148,7 +209,7 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		body, status, contentType, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken)
+		body, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken)
 		if !ok {
 			return
 		}
@@ -159,8 +220,8 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
+	if ct := headers.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
 	}
 	w.Write(body)
 }
@@ -205,5 +266,68 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(publisherPlacementsResponse{
 		Placements: wrapper.Placements,
+	})
+}
+
+func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	placementID := r.PathValue("placementId")
+	accessToken := r.Header.Get("X-Access-Token")
+	refreshToken := r.Header.Get("X-Refresh-Token")
+
+	page, limit, offset := parsePage(r.URL.Query())
+
+	params := url.Values{}
+	params.Set("offset", strconv.Itoa(offset))
+	params.Set("limit", strconv.Itoa(limit))
+	if search := r.URL.Query().Get("search"); search != "" {
+		params.Set("search", search)
+	}
+	if sort := r.URL.Query().Get("sort"); sort != "" {
+		params.Set("sort", sort)
+	}
+
+	path := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings?%s", placementID, params.Encode())
+
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken)
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+
+	if status == http.StatusUnauthorized && refreshToken != "" {
+		var ok bool
+		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken)
+		if !ok {
+			return
+		}
+	}
+
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+		return
+	}
+
+	var wrapper placementDoohsWrapper
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		http.Error(w, "failed to parse dooh-settings response", http.StatusInternalServerError)
+		return
+	}
+
+	total := wrapper.TotalNumberOfElemements
+	if total == 0 {
+		total = parseX360ContentRange(upHeaders.Get("X-360-Content-Range"))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(placementDoohsResponse{
+		DoohSettings: wrapper.DoohSettings,
+		Total:        total,
+		Page:         page,
+		Limit:        limit,
 	})
 }

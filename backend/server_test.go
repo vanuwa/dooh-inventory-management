@@ -260,6 +260,7 @@ const (
 	mockPublisherListBody = `{"publishers":[{"id":42,"name":"Pub One","active":true,"business_unit_name":"Test BU","seller_type":"PUBLISHER","azerion_owned":false}],"totalNumberOfElemements":1}`
 	mockPublisherItemBody = `{"id":42,"name":"Pub One"}`
 	mockPubPlacementsBody = `{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"type":"display"},{"id":102,"name":"Screen B","placement_status":false,"type":"video"}]}`
+	mockDoohSettingsBody  = `{"dooh_settings":[{"id":1,"player_id":"PL-001","device_id":"DEV-001","orientation":"LANDSCAPE","resolution_width":1920,"resolution_height":1080,"country_code":"NL","city":"Amsterdam","cpm":5.0,"currency_code":"EUR"}],"totalNumberOfElemements":1}`
 )
 
 func TestPublishers_Success(t *testing.T) {
@@ -545,6 +546,186 @@ func TestPublisherPlacements_TokenRefresh(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
 		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
+	}
+}
+
+// --- Placement dooh-settings ---
+
+func TestPlacementDoohSettings_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
+				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockDoohSettingsBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		DoohSettings []map[string]any `json:"dooh_settings"`
+		Total        int64            `json:"total"`
+		Page         int              `json:"page"`
+		Limit        int              `json:"limit"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.DoohSettings) != 1 {
+		t.Errorf("dooh_settings: want 1, got %d", len(body.DoohSettings))
+	}
+	if body.Total != 1 {
+		t.Errorf("total: want 1, got %d", body.Total)
+	}
+	if body.Page != 1 {
+		t.Errorf("page: want 1, got %d", body.Page)
+	}
+}
+
+func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("search"); got != "Amsterdam" {
+				t.Errorf("search: want %q, got %q", "Amsterdam", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockDoohSettingsBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings?search=Amsterdam", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestPlacementDoohSettings_TokenRefresh(t *testing.T) {
+	callCount := 0
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockDoohSettingsBody))
+		},
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings", nil)
+	req.Header.Set("X-Access-Token", "expired-token")
+	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
+		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
+	}
+	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
+		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
+	}
+}
+
+func TestPublishers_ContentRangeFallback(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-360-Content-Range", "0 | 20 | 868")
+			// totalNumberOfElemements is 0 — real total is only in the header
+			w.Write([]byte(`{"publishers":[],"totalNumberOfElemements":0}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Total int `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 868 {
+		t.Errorf("total: want 868, got %d", body.Total)
+	}
+}
+
+func TestPlacementDoohSettings_ContentRangeFallback(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-360-Content-Range", "0 | 20 | 450")
+			w.Write([]byte(`{"dooh_settings":[],"totalNumberOfElemements":0}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Total int64 `json:"total"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 450 {
+		t.Errorf("total: want 450, got %d", body.Total)
 	}
 }
 

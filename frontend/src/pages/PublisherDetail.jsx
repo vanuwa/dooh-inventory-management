@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 
 export default function PublisherDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [user, setUser] = useState(null)
   const [publisher, setPublisher] = useState(null)
   const [placements, setPlacements] = useState([])
@@ -134,7 +135,11 @@ export default function PublisherDetail() {
                     </thead>
                     <tbody>
                       {visiblePlacements.map((pl, i) => (
-                        <tr key={pl.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
+                        <tr
+                          key={pl.id}
+                          style={i % 2 !== 0 ? s.rowAlt : s.row}
+                          onClick={() => navigate('/publishers/' + id + '/placements/' + pl.id, { state: { placement: pl } })}
+                        >
                           <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
                           <td style={s.td}>{pl.name}</td>
                           <td style={s.td}>{pl.type || '—'}</td>
@@ -216,7 +221,8 @@ const s = {
     borderBottom: '1px solid #e5e7eb',
   },
   td: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#111827', borderBottom: '1px solid #f3f4f6' },
-  rowAlt: { background: '#fafafa' },
+  row: { cursor: 'pointer' },
+  rowAlt: { background: '#fafafa', cursor: 'pointer' },
   idTag: { color: '#6b7280', fontWeight: 400 },
 
   error: { color: '#dc2626', fontSize: '0.875rem' },

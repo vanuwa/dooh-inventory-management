@@ -27,6 +27,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("/api/publishers", publishersHandler.Publishers)
 	mux.HandleFunc("/api/publishers/{id}", publishersHandler.Publisher)
 	mux.HandleFunc("/api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
+	mux.HandleFunc("/api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PlacementDoohSettings)
 
 	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
 }

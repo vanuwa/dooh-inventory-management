@@ -5,6 +5,7 @@ import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import Publishers from './pages/Publishers.jsx'
 import PublisherDetail from './pages/PublisherDetail.jsx'
+import PlacementDetail from './pages/PlacementDetail.jsx'
 
 export default function App() {
   return (
@@ -33,6 +34,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <PublisherDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/publishers/:publisherId/placements/:placementId"
+            element={
+              <ProtectedRoute>
+                <PlacementDetail />
               </ProtectedRoute>
             }
           />
