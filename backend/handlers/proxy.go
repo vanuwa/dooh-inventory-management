@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/url"
@@ -75,6 +76,51 @@ func refreshAndRetry(cfg *config.Config, w http.ResponseWriter, method, path, re
 	w.Header().Set("X-New-Access-Token", newTokens.AccessToken)
 	w.Header().Set("X-New-Refresh-Token", newTokens.RefreshToken)
 	return body, status, headers, newTokens.AccessToken, true
+}
+
+func doRequestBody(baseURL, method, path, accessToken string, body []byte) ([]byte, int, http.Header, error) {
+	req, err := http.NewRequest(method, baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, nil, err
+	}
+
+	return respBody, resp.StatusCode, resp.Header, nil
+}
+
+func refreshAndRetryBody(cfg *config.Config, w http.ResponseWriter, method, path, refreshToken string, body []byte) ([]byte, int, http.Header, string, bool) {
+	params := url.Values{}
+	params.Set("grant_type", "refresh_token")
+	params.Set("refresh_token", refreshToken)
+
+	newTokens, err := fetchToken(cfg.ImproveAPIBaseURL, cfg.ImproveClientID, cfg.ImproveClientSecret, params)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return nil, 0, nil, "", false
+	}
+
+	respBody, status, headers, err := doRequestBody(cfg.ImproveAPIBaseURL, method, path, newTokens.AccessToken, body)
+	if err != nil {
+		http.Error(w, "upstream request failed after token refresh", http.StatusBadGateway)
+		return nil, 0, nil, "", false
+	}
+
+	w.Header().Set("X-New-Access-Token", newTokens.AccessToken)
+	w.Header().Set("X-New-Refresh-Token", newTokens.RefreshToken)
+	return respBody, status, headers, newTokens.AccessToken, true
 }
 
 func doRequest(baseURL, method, path, accessToken string) ([]byte, int, http.Header, error) {

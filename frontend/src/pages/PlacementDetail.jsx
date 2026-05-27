@@ -1,7 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useLocation, Link } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
+
+const yesterdayStr = (() => {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return d.toISOString().split('T')[0]
+})()
 
 export default function PlacementDetail() {
   const { publisherId, placementId } = useParams()
@@ -9,6 +15,9 @@ export default function PlacementDetail() {
   const placementName = location.state?.placement?.name ?? `Placement ${placementId}`
 
   const [user, setUser] = useState(null)
+  const [activeTab, setActiveTab] = useState('screens')
+
+  // screens tab
   const [doohSettings, setDoohSettings] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -17,6 +26,22 @@ export default function PlacementDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const limit = 20
+
+  // reporting tab
+  const [quickAlias, setQuickAlias] = useState('LAST_7_DAYS')
+  const [dateRangeType, setDateRangeType] = useState('quick')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [reportColumns, setReportColumns] = useState([])
+  const [reportRows, setReportRows] = useState([])
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState('')
+  const [reportLoaded, setReportLoaded] = useState(false)
+  const [csvLoading, setCsvLoading] = useState(false)
+  const [csvError, setCsvError] = useState('')
+  const csvAbortRef = useRef(false)
+
+  useEffect(() => () => { csvAbortRef.current = true }, [])
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -64,8 +89,98 @@ export default function PlacementDetail() {
     return v || fallback
   }
 
+  function buildDateRange() {
+    return dateRangeType === 'quick'
+      ? { quick: quickAlias }
+      : { fixed: { start_date: customStart, end_date: customEnd } }
+  }
+
+  async function fetchReport() {
+    setReportLoading(true)
+    setReportError('')
+    setCsvError('')
+    const dateRange = buildDateRange()
+    try {
+      const res = await apiFetch(`/report/placement/${publisherId}/${placementId}`, {
+        method: 'POST',
+        body: JSON.stringify({ date_range: dateRange }),
+      })
+      const data = await res.json()
+      setReportColumns(data.column_order ?? [])
+      setReportRows(data.rows ?? [])
+      setReportLoaded(true)
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setReportError('Failed to load report.')
+      setReportLoaded(false)
+    } finally {
+      setReportLoading(false)
+    }
+  }
+
+  async function downloadCSV() {
+    csvAbortRef.current = false
+    setCsvLoading(true)
+    setCsvError('')
+    const dateRange = buildDateRange()
+    try {
+      const genRes = await apiFetch(`/report/generate/placement/${publisherId}/${placementId}`, {
+        method: 'POST',
+        body: JSON.stringify({ date_range: dateRange }),
+      })
+      if (!genRes.ok) {
+        setCsvError('Failed to start report generation.')
+        return
+      }
+      const genData = await genRes.json()
+      if (!genData.report_generation_id) {
+        setCsvError('Failed to start report generation.')
+        return
+      }
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000))
+        if (csvAbortRef.current) return
+        const statusRes = await apiFetch(`/report/status/${genData.report_generation_id}`)
+        if (csvAbortRef.current) return
+        if (!statusRes.ok) {
+          setCsvError('Failed to check report status.')
+          return
+        }
+        const statusData = await statusRes.json()
+        if (statusData.status_name === 'FINISHED_OK') {
+          const a = document.createElement('a')
+          a.href = statusData.report_download_url
+          a.style.display = 'none'
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          return
+        }
+        if (statusData.status_name === 'FAILED') {
+          setCsvError(statusData.error || 'Report generation failed.')
+          return
+        }
+      }
+      setCsvError('Report generation timed out.')
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setCsvError('Failed to download report.')
+    } finally {
+      if (!csvAbortRef.current) setCsvLoading(false)
+    }
+  }
+
+  function handleQuickChange(e) {
+    const val = e.target.value
+    if (val === 'custom') {
+      setDateRangeType('fixed')
+    } else {
+      setDateRangeType('quick')
+      setQuickAlias(val)
+    }
+  }
+
   return (
     <Layout user={user}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <main style={s.main}>
         <Link to={'/publishers/' + publisherId} style={s.backLink}>← Publisher</Link>
 
@@ -74,108 +189,225 @@ export default function PlacementDetail() {
           <span style={s.subtitle}>Screens (DOOH Settings)</span>
         </div>
 
-        {error && <p style={s.error}>{error}</p>}
-
-        <div style={s.controls}>
-          <input
-            style={s.searchInput}
-            type="text"
-            placeholder="Search screens…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+        <div style={s.tabBar}>
+          <button style={activeTab === 'screens' ? s.tabActive : s.tab} onClick={() => setActiveTab('screens')}>Screens</button>
+          <button style={activeTab === 'reporting' ? s.tabActive : s.tab} onClick={() => setActiveTab('reporting')}>Reporting</button>
         </div>
 
-        {loading && <p style={s.muted}>Loading screens…</p>}
+        {activeTab === 'screens' && (
+          <>
+            {error && <p style={s.error}>{error}</p>}
 
-        {!loading && !error && doohSettings.length === 0 && (
-          <p style={s.muted}>No screens found.</p>
+            <div style={s.controls}>
+              <input
+                style={s.searchInput}
+                type="text"
+                placeholder="Search screens…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+
+            {loading && <p style={s.muted}>Loading screens…</p>}
+
+            {!loading && !error && doohSettings.length === 0 && (
+              <p style={s.muted}>No screens found.</p>
+            )}
+
+            {!loading && doohSettings.length > 0 && (
+              <>
+                <div style={s.tableWrapper}>
+                  <table style={s.table}>
+                    <thead>
+                      <tr>
+                        <th style={s.th}>ID</th>
+                        <th style={s.th}>Player ID</th>
+                        <th style={s.th}>Device ID</th>
+                        <th style={s.th}>Orientation</th>
+                        <th style={s.th}>Resolution</th>
+                        <th style={s.th}>Physical Size</th>
+                        <th style={s.th}>Venue Type</th>
+                        <th style={s.th}>Country</th>
+                        <th style={s.th}>City</th>
+                        <th style={s.th}>Region</th>
+                        <th style={s.th}>Zip</th>
+                        <th style={s.th}>Address</th>
+                        <th style={s.th}>Duration</th>
+                        <th style={s.th}>CPM</th>
+                        <th style={s.th}>Avg Weekly Audience</th>
+                        <th style={s.th}>Allowed Content</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {doohSettings.map((sc, i) => {
+                        const resolution = sc.resolution_width && sc.resolution_height
+                          ? `${sc.resolution_width}×${sc.resolution_height}`
+                          : '—'
+                        const physicalSize = sc.width && sc.height
+                          ? `${sc.width}×${sc.height}`
+                          : '—'
+                        const venueType = sc.venue_type_id
+                          ? `${sc.venue_type_id}${sc.venue_type_tax ? ` (${sc.venue_type_tax})` : ''}`
+                          : '—'
+                        const duration = sc.min_duration || sc.max_duration
+                          ? `${sc.min_duration}s – ${sc.max_duration}s`
+                          : '—'
+                        const cpm = sc.cpm != null
+                          ? `${sc.cpm.toFixed(2)}${sc.currency_code ? ` ${sc.currency_code}` : ''}`
+                          : '—'
+                        const audience = sc.avg_weekly_audience != null
+                          ? sc.avg_weekly_audience.toLocaleString()
+                          : '—'
+                        return (
+                          <tr key={sc.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
+                            <td style={s.td}><span style={s.idTag}>{sc.id}</span></td>
+                            <td style={s.td}>{fmt(sc.player_id)}</td>
+                            <td style={s.td}>{fmt(sc.device_id)}</td>
+                            <td style={s.td}>{fmt(sc.orientation)}</td>
+                            <td style={s.td}>{resolution}</td>
+                            <td style={s.td}>{physicalSize}</td>
+                            <td style={s.td}>{venueType}</td>
+                            <td style={s.td}>{fmt(sc.country_code)}</td>
+                            <td style={s.td}>{fmt(sc.city)}</td>
+                            <td style={s.td}>{fmt(sc.region)}</td>
+                            <td style={s.td}>{fmt(sc.zip)}</td>
+                            <td style={s.td}>{fmt(sc.address)}</td>
+                            <td style={s.td}>{duration}</td>
+                            <td style={s.td}>{cpm}</td>
+                            <td style={s.td}>{audience}</td>
+                            <td style={s.td}>{fmt(sc.allowed_content)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={s.pagination}>
+                  <button style={s.pageBtn} onClick={() => setPage(p => p - 1)} disabled={page === 1}>
+                    Prev
+                  </button>
+                  <span style={s.pageInfo}>Page {page}{totalPages > 0 ? ` of ${totalPages}` : ''}</span>
+                  <button style={s.pageBtn} onClick={() => setPage(p => p + 1)} disabled={page >= totalPages}>
+                    Next
+                  </button>
+                </div>
+              </>
+            )}
+          </>
         )}
 
-        {!loading && doohSettings.length > 0 && (
+        {activeTab === 'reporting' && (
           <>
-            <div style={s.tableWrapper}>
-              <table style={s.table}>
-                <thead>
-                  <tr>
-                    <th style={s.th}>ID</th>
-                    <th style={s.th}>Player ID</th>
-                    <th style={s.th}>Device ID</th>
-                    <th style={s.th}>Orientation</th>
-                    <th style={s.th}>Resolution</th>
-                    <th style={s.th}>Physical Size</th>
-                    <th style={s.th}>Venue Type</th>
-                    <th style={s.th}>Country</th>
-                    <th style={s.th}>City</th>
-                    <th style={s.th}>Region</th>
-                    <th style={s.th}>Zip</th>
-                    <th style={s.th}>Address</th>
-                    <th style={s.th}>Duration</th>
-                    <th style={s.th}>CPM</th>
-                    <th style={s.th}>Avg Weekly Audience</th>
-                    <th style={s.th}>Allowed Content</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {doohSettings.map((sc, i) => {
-                    const resolution = sc.resolution_width && sc.resolution_height
-                      ? `${sc.resolution_width}×${sc.resolution_height}`
-                      : '—'
-                    const physicalSize = sc.width && sc.height
-                      ? `${sc.width}×${sc.height}`
-                      : '—'
-                    const venueType = sc.venue_type_id
-                      ? `${sc.venue_type_id}${sc.venue_type_tax ? ` (${sc.venue_type_tax})` : ''}`
-                      : '—'
-                    const duration = sc.min_duration || sc.max_duration
-                      ? `${sc.min_duration}s – ${sc.max_duration}s`
-                      : '—'
-                    const cpm = sc.cpm != null
-                      ? `${sc.cpm.toFixed(2)}${sc.currency_code ? ` ${sc.currency_code}` : ''}`
-                      : '—'
-                    const audience = sc.avg_weekly_audience != null
-                      ? sc.avg_weekly_audience.toLocaleString()
-                      : '—'
-                    return (
-                      <tr key={sc.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
-                        <td style={s.td}><span style={s.idTag}>{sc.id}</span></td>
-                        <td style={s.td}>{fmt(sc.player_id)}</td>
-                        <td style={s.td}>{fmt(sc.device_id)}</td>
-                        <td style={s.td}>{fmt(sc.orientation)}</td>
-                        <td style={s.td}>{resolution}</td>
-                        <td style={s.td}>{physicalSize}</td>
-                        <td style={s.td}>{venueType}</td>
-                        <td style={s.td}>{fmt(sc.country_code)}</td>
-                        <td style={s.td}>{fmt(sc.city)}</td>
-                        <td style={s.td}>{fmt(sc.region)}</td>
-                        <td style={s.td}>{fmt(sc.zip)}</td>
-                        <td style={s.td}>{fmt(sc.address)}</td>
-                        <td style={s.td}>{duration}</td>
-                        <td style={s.td}>{cpm}</td>
-                        <td style={s.td}>{audience}</td>
-                        <td style={s.td}>{fmt(sc.allowed_content)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div style={s.reportControls}>
+              <select
+                value={dateRangeType === 'fixed' ? 'custom' : quickAlias}
+                onChange={handleQuickChange}
+                style={s.searchInput}
+              >
+                <option value="YESTERDAY">Yesterday</option>
+                <option value="LAST_7_DAYS">Last 7 Days</option>
+                <option value="LAST_14_DAYS">Last 14 Days</option>
+                <option value="LAST_31_DAYS">Last 31 Days</option>
+                <option value="LAST_90_DAYS">Last 90 Days</option>
+                <option value="THIS_WEEK">This Week</option>
+                <option value="LAST_WEEK">Last Week</option>
+                <option value="THIS_MONTH">This Month</option>
+                <option value="LAST_MONTH">Last Month</option>
+                <option value="LAST_3_MONTHS">Last 3 Months</option>
+                <option value="LAST_6_MONTHS">Last 6 Months</option>
+                <option disabled>──────────</option>
+                <option value="custom">Custom range</option>
+              </select>
+
+              {dateRangeType === 'fixed' && (
+                <>
+                  <input
+                    type="date"
+                    value={customStart}
+                    max={yesterdayStr}
+                    onChange={e => setCustomStart(e.target.value)}
+                    style={s.searchInput}
+                  />
+                  <input
+                    type="date"
+                    value={customEnd}
+                    max={yesterdayStr}
+                    onChange={e => setCustomEnd(e.target.value)}
+                    style={s.searchInput}
+                  />
+                </>
+              )}
+
+              <button style={s.loadBtn} onClick={fetchReport} disabled={reportLoading}>
+                Load Report
+              </button>
+
+              {reportLoaded && reportRows.length > 0 && (
+                <button style={s.csvBtn} onClick={downloadCSV} disabled={reportLoading || csvLoading}>
+                  {csvLoading ? <><span style={s.spinnerSm} />Generating…</> : 'Download CSV'}
+                </button>
+              )}
             </div>
 
-            <div style={s.pagination}>
-              <button style={s.pageBtn} onClick={() => setPage(p => p - 1)} disabled={page === 1}>
-                Prev
-              </button>
-              <span style={s.pageInfo}>Page {page}{totalPages > 0 ? ` of ${totalPages}` : ''}</span>
-              <button style={s.pageBtn} onClick={() => setPage(p => p + 1)} disabled={page >= totalPages}>
-                Next
-              </button>
-            </div>
+            {reportError && <p style={s.error}>{reportError}</p>}
+            {csvError && <p style={s.error}>{csvError}</p>}
+
+            {!reportLoaded && !reportLoading && !reportError && (
+              <p style={s.muted}>Select a date range and click Load Report.</p>
+            )}
+
+            {reportLoading && !reportLoaded && (
+              <div style={s.spinnerCenter}>
+                <span style={s.spinnerLg} />
+              </div>
+            )}
+
+            {reportLoaded && reportRows.length === 0 && !reportLoading && (
+              <p style={s.muted}>No data for this period.</p>
+            )}
+
+            {reportLoaded && reportRows.length > 0 && (
+              <div style={{ position: 'relative' }}>
+                {reportLoading && (
+                  <div style={s.loadingOverlay}>
+                    <span style={s.spinnerLg} />
+                  </div>
+                )}
+                <div style={{ ...s.tableWrapper, opacity: reportLoading ? 0.4 : 1, transition: 'opacity 0.2s' }}>
+                  <table style={s.table}>
+                    <thead>
+                      <tr>
+                        {reportColumns.map(c => (
+                          <th key={c.id} style={s.th}>{c.display}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportRows.map((row, i) => (
+                        <tr key={i} style={i % 2 !== 0 ? s.rowAlt : undefined}>
+                          {reportColumns.map(c => (
+                            <td key={c.id} style={s.td}>
+                              {c.id === 'revenue'
+                                ? (row[c.id] != null ? parseFloat(row[c.id]).toFixed(2) : '—')
+                                : (row[c.id] ?? '—')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </>
         )}
       </main>
     </Layout>
   )
 }
+
+const tabBase = { padding: '0.5rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.875rem', marginBottom: -2 }
 
 const s = {
   main: { padding: '2.5rem 1.5rem', maxWidth: '100%', margin: '0 auto' },
@@ -185,7 +417,12 @@ const s = {
   title: { margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' },
   subtitle: { fontSize: '0.875rem', color: '#6b7280' },
 
+  tabBar: { display: 'flex', marginBottom: '1.5rem', borderBottom: '2px solid #e5e7eb' },
+  tab: { ...tabBase, color: '#6b7280', fontWeight: 500, borderBottom: '2px solid transparent' },
+  tabActive: { ...tabBase, color: '#1a1a2e', fontWeight: 600, borderBottom: '2px solid #1a1a2e' },
+
   controls: { display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' },
+  reportControls: { display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' },
   searchInput: {
     flex: 1,
     maxWidth: 320,
@@ -196,6 +433,12 @@ const s = {
     color: '#111827',
     outline: 'none',
   },
+  loadBtn: { padding: '0.4375rem 1rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
+  spinnerLg: { display: 'inline-block', width: 36, height: 36, border: '3px solid rgba(26,26,46,0.15)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite' },
+  loadingOverlay: { position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, zIndex: 1 },
+  spinnerCenter: { display: 'flex', justifyContent: 'center', padding: '3rem 0' },
+  csvBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' },
+  spinnerSm: { display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(26,26,46,0.2)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 },
 
   tableWrapper: { overflowX: 'auto' },
   table: {

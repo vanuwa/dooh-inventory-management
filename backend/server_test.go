@@ -257,10 +257,12 @@ func TestUserDetails_RefreshFails_Returns401(t *testing.T) {
 // --- Publishers ---
 
 const (
-	mockPublisherListBody = `{"publishers":[{"id":42,"name":"Pub One","active":true,"business_unit_name":"Test BU","seller_type":"PUBLISHER","azerion_owned":false}],"totalNumberOfElemements":1}`
-	mockPublisherItemBody = `{"id":42,"name":"Pub One"}`
-	mockPubPlacementsBody = `{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"type":"display"},{"id":102,"name":"Screen B","placement_status":false,"type":"video"}]}`
-	mockDoohSettingsBody  = `{"dooh_settings":[{"id":1,"player_id":"PL-001","device_id":"DEV-001","orientation":"LANDSCAPE","resolution_width":1920,"resolution_height":1080,"country_code":"NL","city":"Amsterdam","cpm":5.0,"currency_code":"EUR"}],"totalNumberOfElemements":1}`
+	mockPublisherListBody    = `{"publishers":[{"id":42,"name":"Pub One","active":true,"business_unit_name":"Test BU","seller_type":"PUBLISHER","azerion_owned":false}],"totalNumberOfElemements":1}`
+	mockPublisherItemBody    = `{"id":42,"name":"Pub One"}`
+	mockPubPlacementsBody    = `{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"type":"display"},{"id":102,"name":"Screen B","placement_status":false,"type":"video"}]}`
+	mockDoohSettingsBody     = `{"dooh_settings":[{"id":1,"player_id":"PL-001","device_id":"DEV-001","orientation":"LANDSCAPE","resolution_width":1920,"resolution_height":1080,"country_code":"NL","city":"Amsterdam","cpm":5.0,"currency_code":"EUR"}],"totalNumberOfElemements":1}`
+	mockReportPreviewBody    = `{"column_order":[{"id":"day","display":"Day"},{"id":"impressions","display":"Impressions"}],"rows":[{"day":"2026-05-20","impressions":"5000"}]}`
+	mockGenerationStatusBody = `{"report_generation_id":"abc123","status_name":"FINISHED_OK","report_download_url":"https://cdn.example.com/report.csv"}`
 )
 
 func TestPublishers_Success(t *testing.T) {
@@ -726,6 +728,392 @@ func TestPlacementDoohSettings_ContentRangeFallback(t *testing.T) {
 	}
 	if body.Total != 450 {
 		t.Errorf("total: want 450, got %d", body.Total)
+	}
+}
+
+// --- Placement report ---
+
+func TestPlacementReport_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		ColumnOrder []map[string]string `json:"column_order"`
+		Rows        []map[string]string `json:"rows"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.ColumnOrder) != 2 {
+		t.Errorf("column_order: want 2, got %d", len(body.ColumnOrder))
+	}
+	if len(body.Rows) != 1 {
+		t.Errorf("rows: want 1, got %d", len(body.Rows))
+	}
+}
+
+func TestPlacementReport_QuickRange(t *testing.T) {
+	var capturedBody []byte
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, r *http.Request) {
+			capturedBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	var upstreamReq struct {
+		Request struct {
+			DateRange struct {
+				Quick string `json:"quick"`
+			} `json:"date_range"`
+		} `json:"report_generation_request"`
+	}
+	if err := json.Unmarshal(capturedBody, &upstreamReq); err != nil {
+		t.Fatal(err)
+	}
+	if upstreamReq.Request.DateRange.Quick != "LAST_7_DAYS" {
+		t.Errorf("quick: want %q, got %q", "LAST_7_DAYS", upstreamReq.Request.DateRange.Quick)
+	}
+}
+
+func TestPlacementReport_FixedRange(t *testing.T) {
+	var capturedBody []byte
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, r *http.Request) {
+			capturedBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
+		strings.NewReader(`{"date_range":{"fixed":{"start_date":"2026-05-01","end_date":"2026-05-20"}}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	var upstreamReq struct {
+		Request struct {
+			DateRange struct {
+				Fixed *struct {
+					StartDate string `json:"start_date"`
+					EndDate   string `json:"end_date"`
+				} `json:"fixed"`
+			} `json:"date_range"`
+		} `json:"report_generation_request"`
+	}
+	if err := json.Unmarshal(capturedBody, &upstreamReq); err != nil {
+		t.Fatal(err)
+	}
+	if upstreamReq.Request.DateRange.Fixed == nil {
+		t.Fatal("fixed: want non-nil")
+	}
+	if upstreamReq.Request.DateRange.Fixed.StartDate != "2026-05-01" {
+		t.Errorf("start_date: want %q, got %q", "2026-05-01", upstreamReq.Request.DateRange.Fixed.StartDate)
+	}
+	if upstreamReq.Request.DateRange.Fixed.EndDate != "2026-05-20" {
+		t.Errorf("end_date: want %q, got %q", "2026-05-20", upstreamReq.Request.DateRange.Fixed.EndDate)
+	}
+}
+
+func TestPlacementReport_PlacementFilter(t *testing.T) {
+	var capturedBody []byte
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, r *http.Request) {
+			capturedBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	var upstreamReq struct {
+		Request struct {
+			Filters []struct {
+				Column string `json:"column"`
+				Value  string `json:"value"`
+			} `json:"filters"`
+		} `json:"report_generation_request"`
+	}
+	if err := json.Unmarshal(capturedBody, &upstreamReq); err != nil {
+		t.Fatal(err)
+	}
+	if len(upstreamReq.Request.Filters) == 0 {
+		t.Fatal("filters: want at least 1")
+	}
+	if upstreamReq.Request.Filters[0].Column != "placement_id" {
+		t.Errorf("filter column: want %q, got %q", "placement_id", upstreamReq.Request.Filters[0].Column)
+	}
+	if upstreamReq.Request.Filters[0].Value != "101" {
+		t.Errorf("filter value: want %q, got %q", "101", upstreamReq.Request.Filters[0].Value)
+	}
+}
+
+func TestPlacementReport_TokenRefresh(t *testing.T) {
+	callCount := 0
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "expired-token")
+	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
+		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
+	}
+	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
+		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
+	}
+}
+
+// --- Placement report generation ---
+
+func TestGeneratePlacementReport_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/generation": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockGenerationStatusBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/generate/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["report_generation_id"] != "abc123" {
+		t.Errorf("report_generation_id: want %q, got %v", "abc123", body["report_generation_id"])
+	}
+}
+
+func TestGeneratePlacementReport_ReportFormatIsCSV(t *testing.T) {
+	var capturedBody []byte
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/generation": func(w http.ResponseWriter, r *http.Request) {
+			capturedBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockGenerationStatusBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/generate/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	var upstreamReq struct {
+		ReportFormat string `json:"report_format"`
+	}
+	if err := json.Unmarshal(capturedBody, &upstreamReq); err != nil {
+		t.Fatal(err)
+	}
+	if upstreamReq.ReportFormat != "CSV" {
+		t.Errorf("report_format: want %q, got %q", "CSV", upstreamReq.ReportFormat)
+	}
+}
+
+func TestGeneratePlacementReport_TokenRefresh(t *testing.T) {
+	callCount := 0
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/generation": func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockGenerationStatusBody))
+		},
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/generate/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "expired-token")
+	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
+		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
+	}
+	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
+		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
+	}
+}
+
+func TestPlacementReportStatus_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/generation-status/abc123": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockGenerationStatusBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/report/status/abc123", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status_name"] != "FINISHED_OK" {
+		t.Errorf("status_name: want %q, got %v", "FINISHED_OK", body["status_name"])
+	}
+	if body["report_download_url"] == "" {
+		t.Error("report_download_url: want non-empty")
+	}
+}
+
+func TestPlacementReportStatus_TokenRefresh(t *testing.T) {
+	callCount := 0
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/generation-status/abc123": func(w http.ResponseWriter, _ *http.Request) {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockGenerationStatusBody))
+		},
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/report/status/abc123", nil)
+	req.Header.Set("X-Access-Token", "expired-token")
+	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
+		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
+	}
+	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
+		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
 	}
 }
 

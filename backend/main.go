@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"dooh-backend/config"
 	"dooh-backend/handlers"
@@ -20,6 +21,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	authHandler := handlers.NewAuthHandler(cfg)
 	proxyHandler := handlers.NewProxyHandler(cfg)
 	publishersHandler := handlers.NewPublishersHandler(cfg)
+	reportHandler := handlers.NewReportHandler(cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
@@ -28,6 +30,9 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("/api/publishers/{id}", publishersHandler.Publisher)
 	mux.HandleFunc("/api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
 	mux.HandleFunc("/api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PlacementDoohSettings)
+	mux.HandleFunc("/api/report/placement/{publisherId}/{placementId}", reportHandler.PlacementReport)
+	mux.HandleFunc("/api/report/generate/placement/{publisherId}/{placementId}", reportHandler.GeneratePlacementReport)
+	mux.HandleFunc("/api/report/status/{reportGenerationId}", reportHandler.PlacementReportStatus)
 
 	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
 }
@@ -36,7 +41,10 @@ func newHandler(cfg *config.Config) http.Handler {
 // The auth login endpoint is exempt since it requires POST.
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/auth/login" {
+		if r.URL.Path == "/api/auth/login" ||
+			strings.HasPrefix(r.URL.Path, "/api/report/placement/") ||
+			strings.HasPrefix(r.URL.Path, "/api/report/generate/placement/") ||
+			strings.HasPrefix(r.URL.Path, "/api/report/status/") {
 			next.ServeHTTP(w, r)
 			return
 		}
