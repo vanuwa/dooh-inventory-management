@@ -125,7 +125,8 @@ export default function Publishers() {
                   {publishers.map((pub, i) => (
                     <tr
                       key={pub.id}
-                      style={i % 2 !== 0 ? s.rowAlt : s.row}
+                      className="clickable-row"
+                      style={i % 2 !== 0 ? s.rowAlt : undefined}
                       onClick={() => navigate('/publishers/' + pub.id, { state: { publisher: pub } })}
                     >
                       <td style={s.td}><span style={s.idTag}>{pub.id}</span></td>
@@ -200,8 +201,7 @@ const s = {
     textAlign: 'left',
     borderBottom: '1px solid #e5e7eb',
   },
-  row: { cursor: 'pointer' },
-  rowAlt: { background: '#fafafa', cursor: 'pointer' },
+  rowAlt: { background: '#fafafa' },
   td: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#111827', borderBottom: '1px solid #f3f4f6' },
   idTag: { color: '#6b7280', fontWeight: 400 },
 

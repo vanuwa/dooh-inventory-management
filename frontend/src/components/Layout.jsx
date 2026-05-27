@@ -36,7 +36,7 @@ export default function Layout({ user, children }) {
           {user && (
             <>
               <UserAvatar />
-              <span style={s.userName}>{fullName}</span>
+              <Link to="/user" style={s.userName}>{fullName}</Link>
               <span style={s.vDivider} />
             </>
           )}
@@ -75,7 +75,7 @@ const s = {
     background: 'rgba(255,255,255,0.15)',
     flexShrink: 0,
   },
-  userName: { fontSize: '0.875rem', color: '#e2e8f0', fontWeight: 500 },
+  userName: { fontSize: '0.875rem', color: '#e2e8f0', fontWeight: 500, textDecoration: 'none' },
   vDivider: { display: 'inline-block', width: 1, height: 20, background: 'rgba(255,255,255,0.2)' },
   logoutBtn: {
     padding: '0.375rem 0.875rem',

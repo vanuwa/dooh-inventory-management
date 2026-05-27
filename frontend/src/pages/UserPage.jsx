@@ -6,7 +6,7 @@ function RolePill({ label }) {
   return <span style={s.pill}>{label}</span>
 }
 
-export default function Dashboard() {
+export default function UserPage() {
   const [user, setUser] = useState(null)
   const [error, setError] = useState('')
 
@@ -35,14 +35,23 @@ export default function Dashboard() {
 
         {user && (
           <>
-            <h2 style={s.welcome}>Welcome, {user.first_name}!</h2>
+            <h2 style={s.title}>{[user.first_name, user.last_name].filter(Boolean).join(' ')}</h2>
 
             <div style={s.card}>
+              {user.email && (
+                <div style={s.row}>
+                  <span style={s.label}>Email</span>
+                  <span style={s.value}>{user.email}</span>
+                </div>
+              )}
+
+              <div style={s.separator} />
+
               <div style={s.row}>
                 <span style={s.label}>Business Unit</span>
                 <span style={s.value}>
                   {bunit
-                    ? <><span style={s.bunitId}>#{bunit.id}</span>{' '}{bunit.name}</>
+                    ? <>{bunit.id}{' '}{bunit.name}</>
                     : <span style={s.empty}>—</span>}
                 </span>
               </div>
@@ -65,7 +74,7 @@ export default function Dashboard() {
 
 const s = {
   main: { padding: '2.5rem 1.5rem', maxWidth: 680, margin: '0 auto' },
-  welcome: { margin: '0 0 1.75rem', fontSize: '1.625rem', fontWeight: 700, color: '#1a1a2e' },
+  title: { margin: '0 0 1.75rem', fontSize: '1.5rem', fontWeight: 700, color: '#1a1a2e' },
 
   card: {
     background: '#fff',
@@ -88,7 +97,6 @@ const s = {
     color: '#9ca3af',
   },
   value: { fontSize: '0.9375rem', color: '#111827', fontWeight: 500 },
-  bunitId: { color: '#6b7280', fontWeight: 400 },
   empty: { color: '#9ca3af' },
 
   pillRow: { display: 'flex', flexWrap: 'wrap', gap: '0.375rem' },

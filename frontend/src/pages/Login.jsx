@@ -10,7 +10,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />
+  if (isAuthenticated) return <Navigate to="/publishers" replace />
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -28,7 +28,7 @@ export default function Login() {
       }
       const data = await res.json()
       login(data.access_token, data.refresh_token)
-      navigate('/dashboard', { replace: true })
+      navigate('/publishers', { replace: true })
     } catch {
       setError('Login failed. Please try again.')
     } finally {

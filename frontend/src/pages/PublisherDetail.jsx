@@ -14,6 +14,8 @@ export default function PublisherDetail() {
   const [error, setError] = useState('')
   const [placementSearch, setPlacementSearch] = useState('')
   const [placementActiveFilter, setPlacementActiveFilter] = useState('')
+  const [placementPage, setPlacementPage] = useState(1)
+  const placementsPerPage = 20
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -47,12 +49,21 @@ export default function PublisherDetail() {
   }, [id])
 
   const lowerSearch = placementSearch.toLowerCase()
-  const visiblePlacements = placements.filter(pl => {
+  const filteredPlacements = placements.filter(pl => {
     if (placementActiveFilter === 'true' && !pl.placement_status) return false
     if (placementActiveFilter === 'false' && pl.placement_status) return false
     if (lowerSearch && !pl.name.toLowerCase().includes(lowerSearch)) return false
     return true
   })
+  const placementTotalPages = Math.ceil(filteredPlacements.length / placementsPerPage)
+  const visiblePlacements = filteredPlacements.slice(
+    (placementPage - 1) * placementsPerPage,
+    placementPage * placementsPerPage,
+  )
+
+  function handlePlacementFilterChange(setter) {
+    return e => { setter(e.target.value); setPlacementPage(1) }
+  }
 
   return (
     <Layout user={user}>
@@ -107,12 +118,12 @@ export default function PublisherDetail() {
                 type="text"
                 placeholder="Search placements…"
                 value={placementSearch}
-                onChange={e => setPlacementSearch(e.target.value)}
+                onChange={e => { setPlacementSearch(e.target.value); setPlacementPage(1) }}
               />
               <select
                 style={s.select}
                 value={placementActiveFilter}
-                onChange={e => setPlacementActiveFilter(e.target.value)}
+                onChange={handlePlacementFilterChange(setPlacementActiveFilter)}
               >
                 <option value="">All</option>
                 <option value="true">Active only</option>
@@ -137,7 +148,8 @@ export default function PublisherDetail() {
                       {visiblePlacements.map((pl, i) => (
                         <tr
                           key={pl.id}
-                          style={i % 2 !== 0 ? s.rowAlt : s.row}
+                          className="clickable-row"
+                          style={i % 2 !== 0 ? s.rowAlt : undefined}
                           onClick={() => navigate('/publishers/' + id + '/placements/' + pl.id, { state: { placement: pl } })}
                         >
                           <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
@@ -151,6 +163,18 @@ export default function PublisherDetail() {
                 </div>
               )
             }
+
+            {placementTotalPages > 1 && (
+              <div style={s.pagination}>
+                <button style={s.pageBtn} onClick={() => setPlacementPage(p => p - 1)} disabled={placementPage === 1}>
+                  Prev
+                </button>
+                <span style={s.pageInfo}>Page {placementPage} of {placementTotalPages}</span>
+                <button style={s.pageBtn} onClick={() => setPlacementPage(p => p + 1)} disabled={placementPage >= placementTotalPages}>
+                  Next
+                </button>
+              </div>
+            )}
           </>
         )}
       </main>
@@ -221,9 +245,20 @@ const s = {
     borderBottom: '1px solid #e5e7eb',
   },
   td: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#111827', borderBottom: '1px solid #f3f4f6' },
-  row: { cursor: 'pointer' },
-  rowAlt: { background: '#fafafa', cursor: 'pointer' },
+  rowAlt: { background: '#fafafa' },
   idTag: { color: '#6b7280', fontWeight: 400 },
+
+  pagination: { display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' },
+  pageBtn: {
+    padding: '0.375rem 0.875rem',
+    background: '#1a1a2e',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: '0.8125rem',
+  },
+  pageInfo: { fontSize: '0.875rem', color: '#6b7280' },
 
   error: { color: '#dc2626', fontSize: '0.875rem' },
   muted: { color: '#6b7280', fontSize: '0.875rem' },

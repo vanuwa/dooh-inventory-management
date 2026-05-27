@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import Login from './pages/Login.jsx'
-import Dashboard from './pages/Dashboard.jsx'
+import UserPage from './pages/UserPage.jsx'
 import Publishers from './pages/Publishers.jsx'
 import PublisherDetail from './pages/PublisherDetail.jsx'
 import PlacementDetail from './pages/PlacementDetail.jsx'
@@ -14,10 +14,10 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route
-            path="/dashboard"
+            path="/user"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <UserPage />
               </ProtectedRoute>
             }
           />
