@@ -28,6 +28,7 @@ export default function PlacementDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const limit = 20
+  const [screensCsvLoading, setScreensCsvLoading] = useState(false)
 
   // reporting tab
   const [quickAlias, setQuickAlias] = useState('LAST_7_DAYS')
@@ -171,6 +172,45 @@ export default function PlacementDetail() {
     }
   }
 
+  async function downloadScreensCSV() {
+    setScreensCsvLoading(true)
+    try {
+      const all = []
+      let p = 1
+      let total = Infinity
+      while (all.length < total) {
+        const res = await apiFetch(`/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${p}&limit=100`)
+        const data = await res.json()
+        all.push(...(data.dooh_settings ?? []))
+        total = data.total ?? all.length
+        p++
+      }
+      const cols = ['id', 'publisher_id', 'placement_id', 'player_id', 'device_id', 'screen_img_url', 'orientation', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax', 'lat', 'lon', 'country_code', 'region', 'city', 'zip', 'address', 'width', 'height', 'min_duration', 'max_duration', 'avg_weekly_audience', 'cpm', 'currency_code', 'allowed_content']
+      const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+      const csv = [cols.join(','), ...all.map(row => cols.map(c => esc(row[c])).join(','))].join('\n')
+      const now = new Date()
+      const ts = now.getFullYear().toString() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') + 'T' +
+        String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0') +
+        String(now.getSeconds()).padStart(2, '0')
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `placement_${placementId}_screen_data_${ts}.csv`
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setError('Failed to download screens CSV.')
+    } finally {
+      setScreensCsvLoading(false)
+    }
+  }
+
   function handleQuickChange(e) {
     const val = e.target.value
     if (val === 'custom') {
@@ -209,6 +249,9 @@ export default function PlacementDetail() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
+              <button style={s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading}>
+                {screensCsvLoading ? <><span style={s.spinnerSm} />Downloading…</> : 'Download CSV'}
+              </button>
             </div>
 
             {loading && <p style={s.muted}>Loading screens…</p>}
