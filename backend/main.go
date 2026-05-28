@@ -22,6 +22,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	proxyHandler := handlers.NewProxyHandler(cfg)
 	publishersHandler := handlers.NewPublishersHandler(cfg)
 	reportHandler := handlers.NewReportHandler(cfg)
+	bulkUploadJobsHandler := handlers.NewBulkUploadJobsHandler(cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
@@ -33,6 +34,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("/api/report/placement/{publisherId}/{placementId}", reportHandler.PlacementReport)
 	mux.HandleFunc("/api/report/generate/placement/{publisherId}/{placementId}", reportHandler.GeneratePlacementReport)
 	mux.HandleFunc("/api/report/status/{reportGenerationId}", reportHandler.PlacementReportStatus)
+	mux.HandleFunc("/api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.Jobs)
 
 	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
 }
@@ -44,7 +46,8 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 		if r.URL.Path == "/api/auth/login" ||
 			strings.HasPrefix(r.URL.Path, "/api/report/placement/") ||
 			strings.HasPrefix(r.URL.Path, "/api/report/generate/placement/") ||
-			strings.HasPrefix(r.URL.Path, "/api/report/status/") {
+			strings.HasPrefix(r.URL.Path, "/api/report/status/") ||
+			(strings.HasPrefix(r.URL.Path, "/api/publishers/") && strings.HasSuffix(r.URL.Path, "/bulk-upload-jobs")) {
 			next.ServeHTTP(w, r)
 			return
 		}

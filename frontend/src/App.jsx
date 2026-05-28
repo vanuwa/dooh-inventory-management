@@ -38,7 +38,39 @@ export default function App() {
             }
           />
           <Route
+            path="/publishers/:id/placements"
+            element={
+              <ProtectedRoute>
+                <PublisherDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/publishers/:id/bulk-upload-jobs"
+            element={
+              <ProtectedRoute>
+                <PublisherDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/publishers/:publisherId/placements/:placementId"
+            element={
+              <ProtectedRoute>
+                <PlacementDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/publishers/:publisherId/placements/:placementId/screens"
+            element={
+              <ProtectedRoute>
+                <PlacementDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/publishers/:publisherId/placements/:placementId/reporting"
             element={
               <ProtectedRoute>
                 <PlacementDetail />

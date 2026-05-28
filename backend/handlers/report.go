@@ -122,7 +122,7 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	respBody, status, headers, err := doRequestBody(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/preview", accessToken, body)
+	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/preview", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -130,7 +130,7 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		respBody, status, headers, _, ok = refreshAndRetryBody(h.cfg, w, http.MethodPost, "/report/preview", refreshToken, body)
+		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodPost, "/report/preview", refreshToken, body, "application/json")
 		if !ok {
 			return
 		}
@@ -183,7 +183,7 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	respBody, status, headers, err := doRequestBody(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/generation", accessToken, body)
+	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/generation", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -191,7 +191,7 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		respBody, status, headers, _, ok = refreshAndRetryBody(h.cfg, w, http.MethodPost, "/report/generation", refreshToken, body)
+		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodPost, "/report/generation", refreshToken, body, "application/json")
 		if !ok {
 			return
 		}
@@ -214,7 +214,7 @@ func (h *ReportHandler) PlacementReportStatus(w http.ResponseWriter, r *http.Req
 	accessToken := r.Header.Get("X-Access-Token")
 	refreshToken := r.Header.Get("X-Refresh-Token")
 
-	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/report/generation-status/"+reportGenerationId, accessToken)
+	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/report/generation-status/"+reportGenerationId, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -222,7 +222,7 @@ func (h *ReportHandler) PlacementReportStatus(w http.ResponseWriter, r *http.Req
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, "/report/generation-status/"+reportGenerationId, refreshToken)
+		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, "/report/generation-status/"+reportGenerationId, refreshToken, nil, "")
 		if !ok {
 			return
 		}

@@ -150,7 +150,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 
 	upstreamPath := "/admin/v1/publishers?" + params.Encode()
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken)
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -158,7 +158,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, upstreamPath, refreshToken)
+		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, upstreamPath, refreshToken, nil, "")
 		if !ok {
 			return
 		}
@@ -201,7 +201,7 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 
 	path := "/admin/v1/publishers/" + id
 
-	body, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken)
+	body, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -209,7 +209,7 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		body, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken)
+		body, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken, nil, "")
 		if !ok {
 			return
 		}
@@ -238,7 +238,7 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 
 	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements", id)
 
-	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken)
+	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -246,7 +246,7 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		body, status, _, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken)
+		body, status, _, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken, nil, "")
 		if !ok {
 			return
 		}
@@ -293,7 +293,7 @@ func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http
 
 	path := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings?%s", placementID, params.Encode())
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken)
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -301,7 +301,7 @@ func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http
 
 	if status == http.StatusUnauthorized && refreshToken != "" {
 		var ok bool
-		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken)
+		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken, nil, "")
 		if !ok {
 			return
 		}

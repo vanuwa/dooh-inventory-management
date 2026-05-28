@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useLocation, Link } from 'react-router-dom'
+import { useParams, useLocation, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
+import { tabStyles } from '../styles/tabs.js'
 
 const yesterdayStr = (() => {
   const d = new Date()
@@ -12,10 +13,11 @@ const yesterdayStr = (() => {
 export default function PlacementDetail() {
   const { publisherId, placementId } = useParams()
   const location = useLocation()
+  const navigate = useNavigate()
   const placementName = location.state?.placement?.name ?? `Placement ${placementId}`
+  const activeTab = location.pathname.endsWith('/reporting') ? 'reporting' : 'screens'
 
   const [user, setUser] = useState(null)
-  const [activeTab, setActiveTab] = useState('screens')
 
   // screens tab
   const [doohSettings, setDoohSettings] = useState([])
@@ -59,6 +61,7 @@ export default function PlacementDetail() {
   }, [search])
 
   useEffect(() => {
+    if (activeTab !== 'screens') return
     setLoading(true)
     setError('')
     let path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${page}&limit=${limit}`
@@ -81,7 +84,7 @@ export default function PlacementDetail() {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [publisherId, placementId, page, committedSearch])
+  }, [publisherId, placementId, page, committedSearch, activeTab])
 
   const totalPages = Math.ceil(total / limit)
 
@@ -182,16 +185,16 @@ export default function PlacementDetail() {
     <Layout user={user}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <main style={s.main}>
-        <Link to={'/publishers/' + publisherId} style={s.backLink}>← Publisher</Link>
+        <Link to={'/publishers/' + publisherId + '/placements'} style={s.backLink}>← Publisher</Link>
 
         <div style={s.heading}>
           <h2 style={s.title}>{placementName}</h2>
           <span style={s.subtitle}>Screens (DOOH Settings)</span>
         </div>
 
-        <div style={s.tabBar}>
-          <button style={activeTab === 'screens' ? s.tabActive : s.tab} onClick={() => setActiveTab('screens')}>Screens</button>
-          <button style={activeTab === 'reporting' ? s.tabActive : s.tab} onClick={() => setActiveTab('reporting')}>Reporting</button>
+        <div style={tabStyles.tabBar}>
+          <button style={activeTab === 'screens' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/screens`)}>Screens</button>
+          <button style={activeTab === 'reporting' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/reporting`)}>Reporting</button>
         </div>
 
         {activeTab === 'screens' && (
@@ -407,8 +410,6 @@ export default function PlacementDetail() {
   )
 }
 
-const tabBase = { padding: '0.5rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.875rem', marginBottom: -2 }
-
 const s = {
   main: { padding: '2.5rem 1.5rem', maxWidth: '100%', margin: '0 auto' },
   backLink: { display: 'inline-block', marginBottom: '1rem', color: '#4338ca', fontSize: '0.875rem', textDecoration: 'none', fontWeight: 500 },
@@ -416,10 +417,6 @@ const s = {
   heading: { marginBottom: '1.5rem' },
   title: { margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' },
   subtitle: { fontSize: '0.875rem', color: '#6b7280' },
-
-  tabBar: { display: 'flex', marginBottom: '1.5rem', borderBottom: '2px solid #e5e7eb' },
-  tab: { ...tabBase, color: '#6b7280', fontWeight: 500, borderBottom: '2px solid transparent' },
-  tabActive: { ...tabBase, color: '#1a1a2e', fontWeight: 600, borderBottom: '2px solid #1a1a2e' },
 
   controls: { display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' },
   reportControls: { display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' },

@@ -30,31 +30,53 @@ npm run build  # production build into dist/
 
 ## Architecture
 
-Full-stack DOOH inventory management portal:
-- **Backend:** Go stdlib HTTP server (no external deps) at `backend/`
-- **Frontend:** React 19 + React Router 7 + Vite 6 at `frontend/`
-- **Auth upstream:** Improve Digital (360Yield) OAuth2 API — credentials in `.env`
+Read-only SSP inventory management portal for DOOH operations. Proxies the Improve Digital (360Yield) API — no local database.
 
-In Docker: nginx serves the React SPA and reverse-proxies `/api/` to the Go backend (`http://api:8080/`).
+- **Backend:** Go stdlib HTTP (no external deps) at `backend/`
+- **Frontend:** React 19 + React Router 7 + Vite 6 at `frontend/`
+- **In Docker:** nginx serves the SPA and reverse-proxies `/api/` to the Go backend (`http://api:8080/`)
 
 ### Auth & Token Flow
 
-1. Frontend POSTs credentials to `POST /api/auth/login` → Go calls Improve Digital `/oauth/token` → returns tokens to frontend (stored in localStorage).
+1. Frontend POSTs credentials to `POST /api/auth/login` → Go calls upstream `/oauth/token` (password grant) → returns `{access_token, refresh_token}`.
 2. Authenticated requests carry tokens in `X-Access-Token` / `X-Refresh-Token` headers.
-3. Go proxy (`handlers/proxy.go`) auto-refreshes on 401 and retries; new tokens returned in `X-New-Access-Token` / `X-New-Refresh-Token` response headers.
+3. Backend auto-refreshes on 401 and retries; new tokens returned in `X-New-Access-Token` / `X-New-Refresh-Token` response headers.
 4. `frontend/src/api.js` reads those headers, updates localStorage, and triggers logout on terminal 401.
+5. Login page uses raw `fetch` (not `apiFetch`) because tokens don't exist yet.
 
-### Backend layout (`backend/`)
+The upstream OAuth response has a non-standard shape — `{value, refreshToken: {value}}`. `handlers/auth.go` normalizes it to `{access_token, refresh_token}`.
+
+### Read-only Enforcement
+
+A middleware in `main.go` blocks all non-GET requests except `/api/auth/login` and `/api/report/*`. No mutations are possible through this portal.
+
+### Backend Layout (`backend/`)
 
 | Path | Purpose |
 |---|---|
 | `main.go` | Server setup, route registration, CORS + read-only middleware |
 | `config/config.go` | Env var loading (`IMPROVE_*`, `FRONTEND_ORIGIN`, `PORT`) |
-| `handlers/auth.go` | `POST /api/auth/login` — OAuth password grant |
-| `handlers/proxy.go` | `GET /api/user/details` — proxy with refresh-and-retry |
-| `server_test.go` | Unit tests with a mock upstream server |
+| `handlers/auth.go` | `POST /api/auth/login` — OAuth password grant, normalizes token shape |
+| `handlers/proxy.go` | Core `doRequest` + `refreshAndRetry` helpers used by all handlers |
+| `handlers/publishers.go` | Publishers list/detail, placements, DOOH settings |
+| `handlers/report.go` | Report preview, generation, and status polling |
+| `server_test.go` | ~1200-line unit test suite with a mock upstream server |
 
-### Frontend layout (`frontend/src/`)
+### API Routes
+
+```
+POST /api/auth/login
+GET  /api/user/details
+GET  /api/publishers?page&limit&search&active
+GET  /api/publishers/{id}
+GET  /api/publishers/{id}/placements
+GET  /api/publishers/{publisherId}/placements/{placementId}/dooh-settings?page&limit&search&sort
+POST /api/report/placement/{publisherId}/{placementId}           ← preview
+POST /api/report/generate/placement/{publisherId}/{placementId}  ← start CSV generation
+GET  /api/report/status/{reportGenerationId}                     ← poll until FINISHED_OK
+```
+
+### Frontend Layout (`frontend/src/`)
 
 | Path | Purpose |
 |---|---|
@@ -62,8 +84,23 @@ In Docker: nginx serves the React SPA and reverse-proxies `/api/` to the Go back
 | `context/AuthContext.jsx` | Auth state, localStorage sync, login/logout |
 | `api.js` | Fetch wrapper: attaches tokens, handles header-based token refresh |
 | `pages/Login.jsx` | Login form |
-| `pages/Dashboard.jsx` | Shows authenticated user details |
+| `pages/Publishers.jsx` | Paginated/searchable publishers table (landing page) |
+| `pages/PublisherDetail.jsx` | Publisher metadata + client-side filtered placements list |
+| `pages/PlacementDetail.jsx` | Two-tab UI: Screens grid (server-side paginated) + Reporting tab |
+| `pages/UserPage.jsx` | User profile (email, business unit, roles) |
+| `components/Layout.jsx` | Header with nav, user avatar, logout |
 | `components/ProtectedRoute.jsx` | Redirects unauthenticated users to `/login` |
+| `components/StatusBadge.jsx` | Reusable active/inactive badge |
+
+### Key Implementation Details
+
+- **No CSS files** — all styling is inline style objects in JSX. Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg).
+- **Client-side filtering:** `PublisherDetail` loads all placements once and filters in React state. `PlacementDetail` screens use server-side pagination.
+- **Debounced search:** 300ms delay before fetching in Publishers and PlacementDetail screens tab.
+- **Abort signals:** All async fetch operations use `AbortController` to cancel in-flight requests on unmount.
+- **Report polling:** CSV generation polls `/report/status` every 2 seconds, up to 60 attempts (2-minute timeout).
+- **Upstream API typo:** The 360Yield API returns `totalNumberOfElemements` (missing an 's'). `handlers/publishers.go` handles both spellings and falls back to the `X-360-Content-Range` header.
+- **Pagination defaults:** 20 items per page, max 100. Offset = `(page - 1) * limit`.
 
 ---
 

@@ -8,10 +8,11 @@ export async function apiFetch(path, options = {}) {
   const accessToken = localStorage.getItem('access_token')
   const refreshToken = localStorage.getItem('refresh_token')
 
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers,
+  const headers = {}
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json'
   }
+  Object.assign(headers, options.headers)
 
   if (accessToken) headers['X-Access-Token'] = accessToken
   if (refreshToken) headers['X-Refresh-Token'] = refreshToken
