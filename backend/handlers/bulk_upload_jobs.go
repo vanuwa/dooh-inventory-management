@@ -13,19 +13,30 @@ import (
 
 const maxUploadBytes = 50 << 20 // 50 MB
 
-type bulkUploadJobDto struct {
+type taskDto struct {
 	ID                 int64    `json:"id"`
-	JobType            string   `json:"job_type"`
-	FileName           string   `json:"file_name"`
-	MimeType           string   `json:"mime_type"`
-	JobStatus          string   `json:"job_status"`
-	PercentageDone     float64  `json:"percentage_done"`
-	ExecutedBy         string   `json:"executed_by"`
-	OwnerObjectID      int64    `json:"owner_object_id"`
+	TaskDescription    string   `json:"task_description"`
+	Status             string   `json:"status"`
 	ExecutionStartedAt string   `json:"execution_started_at"`
 	ExecutionEndedAt   string   `json:"execution_ended_at"`
 	ErrorMessages      []string `json:"error_messages"`
-	JobCompleted       bool     `json:"job_completed"`
+	UploadedEntityID   *int64   `json:"uploaded_entity_id"`
+}
+
+type bulkUploadJobDto struct {
+	ID                 int64     `json:"id"`
+	JobType            string    `json:"job_type"`
+	FileName           string    `json:"file_name"`
+	MimeType           string    `json:"mime_type"`
+	JobStatus          string    `json:"job_status"`
+	PercentageDone     float64   `json:"percentage_done"`
+	ExecutedBy         string    `json:"executed_by"`
+	OwnerObjectID      int64     `json:"owner_object_id"`
+	ExecutionStartedAt string    `json:"execution_started_at"`
+	ExecutionEndedAt   string    `json:"execution_ended_at"`
+	ErrorMessages      []string  `json:"error_messages"`
+	JobCompleted       bool      `json:"job_completed"`
+	Tasks              []taskDto `json:"tasks"`
 }
 
 type bulkUploadJobsWrapper struct {
