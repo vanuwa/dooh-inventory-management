@@ -45,8 +45,13 @@ export default function BulkUploadJobsTab({ publisherId }) {
     try {
       const res = await apiFetch(`/publishers/${publisherId}/bulk-upload-jobs`, { method: 'POST', body: formData })
       let jobId = null
-      try { const data = await res.json(); jobId = data.id ?? null } catch (_) {}
-      setUploadResult({ status: res.status, statusText: res.statusText, jobId })
+      let errorBody = null
+      try {
+        const data = await res.json()
+        if (res.ok) { jobId = data.id ?? null }
+        else { errorBody = data.message ?? data.error ?? JSON.stringify(data) }
+      } catch (_) {}
+      setUploadResult({ status: res.status, statusText: res.statusText, jobId, ok: res.ok, errorBody })
       if (res.ok) {
         setUploadFile(null)
         setRefreshTick(t => t + 1)
@@ -83,9 +88,12 @@ export default function BulkUploadJobsTab({ publisherId }) {
             />
           </div>
           {uploadResult && (
-            <div style={uploadResult.jobId ? s.resultSuccess : s.resultError}>
+            <div style={uploadResult.ok ? s.resultSuccess : s.resultError}>
               <strong>{uploadResult.status} {uploadResult.statusText}</strong>
               {uploadResult.jobId && <span> — Job ID: {uploadResult.jobId}</span>}
+              {!uploadResult.ok && uploadResult.errorBody && (
+                <div style={{ marginTop: '0.25rem', fontSize: '0.8125rem' }}>{uploadResult.errorBody}</div>
+              )}
             </div>
           )}
           <button type="submit" style={s.submitBtn} disabled={!uploadFile || uploading}>
