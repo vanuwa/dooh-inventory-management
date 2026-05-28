@@ -62,7 +62,6 @@ func (h *BulkUploadJobsHandler) Jobs(w http.ResponseWriter, r *http.Request) {
 func (h *BulkUploadJobsHandler) listJobs(w http.ResponseWriter, r *http.Request) {
 	publisherID := r.PathValue("publisherId")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	page, limit, offset := parsePage(r.URL.Query())
 
@@ -78,14 +77,6 @@ func (h *BulkUploadJobsHandler) listJobs(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, upstreamPath, refreshToken, nil, "")
-		if !ok {
-			return
-		}
 	}
 
 	if status != http.StatusOK {
@@ -116,7 +107,6 @@ func (h *BulkUploadJobsHandler) listJobs(w http.ResponseWriter, r *http.Request)
 func (h *BulkUploadJobsHandler) createJob(w http.ResponseWriter, r *http.Request) {
 	publisherID := r.PathValue("publisherId")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	contentType := r.Header.Get("Content-Type")
 
@@ -133,14 +123,6 @@ func (h *BulkUploadJobsHandler) createJob(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		respBody, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodPost, upstreamPath, refreshToken, rawBody, contentType)
-		if !ok {
-			return
-		}
 	}
 
 	if ct := upHeaders.Get("Content-Type"); ct != "" {

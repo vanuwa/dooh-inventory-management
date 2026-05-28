@@ -4,26 +4,42 @@ export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler
 }
 
-export async function apiFetch(path, options = {}) {
-  const accessToken = localStorage.getItem('access_token')
+async function refreshTokens() {
   const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return false
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    if (!res.ok) return false
+    const data = await res.json()
+    localStorage.setItem('access_token', data.access_token)
+    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function apiFetch(path, options = {}, _retried = false) {
+  const accessToken = localStorage.getItem('access_token')
 
   const headers = {}
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
   Object.assign(headers, options.headers)
-
   if (accessToken) headers['X-Access-Token'] = accessToken
-  if (refreshToken) headers['X-Refresh-Token'] = refreshToken
 
   const response = await fetch('/api' + path, { ...options, headers })
 
-  const newAccessToken = response.headers.get('X-New-Access-Token')
-  const newRefreshToken = response.headers.get('X-New-Refresh-Token')
-  if (newAccessToken) {
-    localStorage.setItem('access_token', newAccessToken)
-    if (newRefreshToken) localStorage.setItem('refresh_token', newRefreshToken)
+  if (response.status === 401 && !_retried) {
+    const ok = await refreshTokens()
+    if (ok) return apiFetch(path, options, true)
+    if (onUnauthorized) onUnauthorized()
+    throw new Error('Unauthorized')
   }
 
   if (response.status === 401) {

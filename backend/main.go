@@ -26,6 +26,7 @@ func newHandler(cfg *config.Config) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
+	mux.HandleFunc("/api/auth/refresh", authHandler.Refresh)
 	mux.HandleFunc("/api/user/details", proxyHandler.UserDetails)
 	mux.HandleFunc("/api/publishers", publishersHandler.Publishers)
 	mux.HandleFunc("/api/publishers/{id}", publishersHandler.Publisher)
@@ -44,6 +45,7 @@ func newHandler(cfg *config.Config) http.Handler {
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth/login" ||
+			r.URL.Path == "/api/auth/refresh" ||
 			strings.HasPrefix(r.URL.Path, "/api/report/placement/") ||
 			strings.HasPrefix(r.URL.Path, "/api/report/generate/placement/") ||
 			strings.HasPrefix(r.URL.Path, "/api/report/status/") ||
@@ -63,8 +65,7 @@ func corsMiddleware(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token, X-Refresh-Token")
-		w.Header().Set("Access-Control-Expose-Headers", "X-New-Access-Token, X-New-Refresh-Token")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

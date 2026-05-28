@@ -96,7 +96,6 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 
 	placementId := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	var req placementReportReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -128,14 +127,6 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodPost, "/report/preview", refreshToken, body, "application/json")
-		if !ok {
-			return
-		}
-	}
-
 	if ct := headers.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
@@ -151,7 +142,6 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 
 	placementId := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	var req placementReportReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -189,14 +179,6 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodPost, "/report/generation", refreshToken, body, "application/json")
-		if !ok {
-			return
-		}
-	}
-
 	if ct := headers.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
@@ -212,20 +194,11 @@ func (h *ReportHandler) PlacementReportStatus(w http.ResponseWriter, r *http.Req
 
 	reportGenerationId := r.PathValue("reportGenerationId")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/report/generation-status/"+reportGenerationId, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		respBody, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, "/report/generation-status/"+reportGenerationId, refreshToken, nil, "")
-		if !ok {
-			return
-		}
 	}
 
 	if ct := headers.Get("Content-Type"); ct != "" {

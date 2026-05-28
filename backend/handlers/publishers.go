@@ -132,7 +132,6 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	page, limit, offset := parsePage(r.URL.Query())
 
@@ -154,14 +153,6 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, upstreamPath, refreshToken, nil, "")
-		if !ok {
-			return
-		}
 	}
 
 	if status != http.StatusOK {
@@ -197,7 +188,6 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	path := "/admin/v1/publishers/" + id
 
@@ -205,14 +195,6 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		body, status, headers, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken, nil, "")
-		if !ok {
-			return
-		}
 	}
 
 	if status != http.StatusOK {
@@ -234,7 +216,6 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 
 	id := r.PathValue("id")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements", id)
 
@@ -242,14 +223,6 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		body, status, _, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken, nil, "")
-		if !ok {
-			return
-		}
 	}
 
 	if status != http.StatusOK {
@@ -277,7 +250,6 @@ func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http
 
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
-	refreshToken := r.Header.Get("X-Refresh-Token")
 
 	page, limit, offset := parsePage(r.URL.Query())
 
@@ -297,14 +269,6 @@ func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
-	}
-
-	if status == http.StatusUnauthorized && refreshToken != "" {
-		var ok bool
-		body, status, upHeaders, _, ok = refreshAndRetry(h.cfg, w, http.MethodGet, path, refreshToken, nil, "")
-		if !ok {
-			return
-		}
 	}
 
 	if status != http.StatusOK {
