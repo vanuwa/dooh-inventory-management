@@ -64,6 +64,7 @@ export default function PlacementDetail() {
   const activeTab = location.pathname.endsWith('/reporting') ? 'reporting' : 'screens'
 
   const [user, setUser] = useState(null)
+  const [publisherName, setPublisherName] = useState(location.state?.publisherName ?? '')
 
   // screens tab
   const [doohSettings, setDoohSettings] = useState([])
@@ -107,6 +108,14 @@ export default function PlacementDetail() {
       .then(setUser)
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (publisherName) return
+    apiFetch(`/publishers/${publisherId}`)
+      .then(res => res.json())
+      .then(data => { if (data.name) setPublisherName(data.name) })
+      .catch(() => {})
+  }, [publisherId])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -316,7 +325,7 @@ export default function PlacementDetail() {
     <Layout user={user}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <main style={s.main}>
-        <Link to={'/publishers/' + publisherId + '/placements'} style={s.backLink}>← Publisher</Link>
+        <Link to={'/publishers/' + publisherId + '/placements'} style={s.backLink}>← Publisher{publisherName ? `: ${publisherName}` : ''}</Link>
 
         <div style={s.heading}>
           <h2 style={s.title}>{placementName}</h2>

@@ -27,6 +27,7 @@ export default function Layout({ user, children }) {
     <div style={s.page}>
       <header style={s.header}>
         <div style={s.headerLeft}>
+          <img src="/icon.png" alt="Brain Juice" title="Brain Juice" style={{ width: 42, height: 42, flexShrink: 0 }} />
           <span style={s.headerTitle}>DOOH Inventory Management</span>
           <nav style={s.nav}>
             <Link to="/publishers" style={s.navLink}>Publishers</Link>

@@ -168,7 +168,7 @@ export default function PublisherDetail() {
                               key={pl.id}
                               className="clickable-row"
                               style={i % 2 !== 0 ? s.rowAlt : undefined}
-                              onClick={() => navigate('/publishers/' + id + '/placements/' + pl.id, { state: { placement: pl } })}
+                              onClick={() => navigate('/publishers/' + id + '/placements/' + pl.id, { state: { placement: pl, publisherName: publisher?.name } })}
                             >
                               <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
                               <td style={s.td}>{pl.name}</td>
