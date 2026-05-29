@@ -1,26 +1,36 @@
 let onUnauthorized = null
+let pendingRefresh = null
 
 export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler
 }
 
 async function refreshTokens() {
+  if (pendingRefresh) return pendingRefresh
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) return false
-  try {
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    })
-    if (!res.ok) return false
-    const data = await res.json()
-    localStorage.setItem('access_token', data.access_token)
-    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
-    return true
-  } catch {
-    return false
+
+  const doRefresh = async () => {
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+      if (!res.ok) return false
+      const data = await res.json()
+      localStorage.setItem('access_token', data.access_token)
+      if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+      return true
+    } catch {
+      return false
+    } finally {
+      pendingRefresh = null
+    }
   }
+
+  pendingRefresh = doRefresh()
+  return pendingRefresh
 }
 
 export async function apiFetch(path, options = {}, _retried = false) {
