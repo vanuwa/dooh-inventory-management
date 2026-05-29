@@ -4,6 +4,52 @@ import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { tabStyles } from '../styles/tabs.js'
 
+const SCREEN_FIELDS = [
+  ['ID', 'id', false],
+  ['Publisher ID', 'publisher_id', false],
+  ['Placement ID', 'placement_id', false],
+  ['Player ID', 'player_id', true, 'text'],
+  ['Device ID', 'device_id', true, 'text'],
+  ['Screen Image URL', 'screen_img_url', true, 'text'],
+  ['Orientation', 'orientation', true, 'text'],
+  ['Resolution Width', 'resolution_width', true, 'number'],
+  ['Resolution Height', 'resolution_height', true, 'number'],
+  ['Venue Type ID', 'venue_type_id', true, 'number'],
+  ['Venue Type Tax', 'venue_type_tax', true, 'text'],
+  ['Latitude', 'lat', true, 'number'],
+  ['Longitude', 'lon', true, 'number'],
+  ['Country Code', 'country_code', true, 'text'],
+  ['Region', 'region', true, 'text'],
+  ['City', 'city', true, 'text'],
+  ['Zip', 'zip', true, 'text'],
+  ['Address', 'address', true, 'text'],
+  ['Width (cm)', 'width', true, 'number'],
+  ['Height (cm)', 'height', true, 'number'],
+  ['Min Duration (s)', 'min_duration', true, 'number'],
+  ['Max Duration (s)', 'max_duration', true, 'number'],
+  ['Avg Weekly Audience', 'avg_weekly_audience', true, 'number'],
+  ['CPM', 'cpm', true, 'number'],
+  ['Currency Code', 'currency_code', true, 'text'],
+  ['Allowed Content', 'allowed_content', true, 'text'],
+]
+
+function coerceTypes(vals) {
+  const intFields = ['resolution_width', 'resolution_height', 'venue_type_id', 'width', 'height', 'min_duration', 'max_duration']
+  const floatFields = ['lat', 'lon', 'avg_weekly_audience', 'cpm']
+  const out = { ...vals }
+  for (const f of intFields) {
+    if (out[f] === '' || out[f] == null) { out[f] = null; continue }
+    const n = parseInt(out[f], 10)
+    out[f] = isNaN(n) ? null : n
+  }
+  for (const f of floatFields) {
+    if (out[f] === '' || out[f] == null) { out[f] = null; continue }
+    const n = parseFloat(out[f])
+    out[f] = isNaN(n) ? null : n
+  }
+  return out
+}
+
 const yesterdayStr = (() => {
   const d = new Date()
   d.setDate(d.getDate() - 1)
@@ -29,6 +75,15 @@ export default function PlacementDetail() {
   const [error, setError] = useState('')
   const limit = 20
   const [screensCsvLoading, setScreensCsvLoading] = useState(false)
+  const [screensTick, setScreensTick] = useState(0)
+
+  // screen detail modal
+  const [selectedScreen, setSelectedScreen] = useState(null)
+  const [hoveredScreenId, setHoveredScreenId] = useState(null)
+  const [editMode, setEditMode] = useState(false)
+  const [editValues, setEditValues] = useState({})
+  const [saveLoading, setSaveLoading] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   // reporting tab
   const [quickAlias, setQuickAlias] = useState('LAST_7_DAYS')
@@ -85,7 +140,7 @@ export default function PlacementDetail() {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [publisherId, placementId, page, committedSearch, activeTab])
+  }, [publisherId, placementId, page, committedSearch, activeTab, screensTick])
 
   const totalPages = Math.ceil(total / limit)
 
@@ -211,6 +266,42 @@ export default function PlacementDetail() {
     }
   }
 
+  function handleEdit() {
+    setEditValues({ ...selectedScreen })
+    setEditMode(true)
+    setSaveError('')
+  }
+
+  async function handleSave() {
+    setSaveLoading(true)
+    setSaveError('')
+    const updated = coerceTypes(editValues)
+    const payload = Object.fromEntries(
+      Object.entries(updated).filter(([k, v]) =>
+        (v != null && v !== '') || (selectedScreen[k] != null && selectedScreen[k] !== '')
+      )
+    )
+    const body = { dooh_settings: [payload] }
+    try {
+      const res = await apiFetch(
+        `/publishers/${publisherId}/placements/${placementId}/dooh-settings`,
+        { method: 'PUT', body: JSON.stringify(body) }
+      )
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        setSaveError(errData.message ?? `Save failed (${res.status})`)
+        return
+      }
+      setDoohSettings(prev => prev.map(sc => sc.id === updated.id ? updated : sc))
+      setSelectedScreen(updated)
+      setEditMode(false)
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setSaveError('Save failed.')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+
   function handleQuickChange(e) {
     const val = e.target.value
     if (val === 'custom') {
@@ -251,6 +342,9 @@ export default function PlacementDetail() {
               />
               <button style={s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading}>
                 {screensCsvLoading ? <><span style={s.spinnerSm} />Downloading…</> : 'Download CSV'}
+              </button>
+              <button style={s.refreshBtn} onClick={() => setScreensTick(t => t + 1)} disabled={loading}>
+                Refresh
               </button>
             </div>
 
@@ -305,7 +399,13 @@ export default function PlacementDetail() {
                           ? sc.avg_weekly_audience.toLocaleString()
                           : '—'
                         return (
-                          <tr key={sc.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
+                          <tr
+                            key={sc.id}
+                            onClick={() => { setSelectedScreen(sc); setEditMode(false) }}
+                            onMouseEnter={() => setHoveredScreenId(sc.id)}
+                            onMouseLeave={() => setHoveredScreenId(null)}
+                            style={{ cursor: 'pointer', background: hoveredScreenId === sc.id ? '#e8edf2' : (i % 2 !== 0 ? '#fafafa' : undefined) }}
+                          >
                             <td style={s.td}><span style={s.idTag}>{sc.id}</span></td>
                             <td style={s.td}>{fmt(sc.player_id)}</td>
                             <td style={s.td}>{fmt(sc.device_id)}</td>
@@ -341,6 +441,58 @@ export default function PlacementDetail() {
               </>
             )}
           </>
+        )}
+
+        {selectedScreen && (
+          <div style={s.overlay} onClick={() => setSelectedScreen(null)}>
+            <div style={s.modal} onClick={e => e.stopPropagation()}>
+              <div style={s.modalHeader}>
+                <h3 style={s.modalTitle}>Screen #{selectedScreen.id}</h3>
+                {!editMode && (
+                  <button style={s.editBtn} onClick={handleEdit}>Edit</button>
+                )}
+              </div>
+
+              <div style={s.modalBodyScroll}>
+                <table style={s.modalTable}>
+                  <tbody>
+                    {SCREEN_FIELDS.map(([label, field, editable, inputType]) => (
+                      <tr key={field} style={s.modalRow}>
+                        <td style={s.modalLabel}>{label}</td>
+                        <td style={s.modalValue}>
+                          {editMode && editable
+                            ? <input
+                                type={inputType}
+                                value={editValues[field] ?? ''}
+                                onChange={e => setEditValues(prev => ({ ...prev, [field]: e.target.value }))}
+                                style={s.editInput}
+                                step={inputType === 'number' ? 'any' : undefined}
+                              />
+                            : (selectedScreen[field] != null && selectedScreen[field] !== '' ? String(selectedScreen[field]) : '—')
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {editMode && saveError && <p style={s.saveError}>{saveError}</p>}
+
+              <div style={s.modalFooter}>
+                {editMode ? (
+                  <>
+                    <button style={s.cancelBtn} onClick={() => { setEditMode(false); setSaveError('') }}>Cancel</button>
+                    <button style={s.primaryBtn} onClick={handleSave} disabled={saveLoading}>
+                      {saveLoading ? 'Saving…' : 'Save'}
+                    </button>
+                  </>
+                ) : (
+                  <button style={s.primaryBtn} onClick={() => setSelectedScreen(null)}>Close</button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {activeTab === 'reporting' && (
@@ -478,6 +630,7 @@ const s = {
   loadingOverlay: { position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, zIndex: 1 },
   spinnerCenter: { display: 'flex', justifyContent: 'center', padding: '3rem 0' },
   csvBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' },
+  refreshBtn: { padding: '0.375rem 0.75rem', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem', marginLeft: 'auto' },
   spinnerSm: { display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(26,26,46,0.2)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 },
 
   tableWrapper: { overflowX: 'auto' },
@@ -520,4 +673,20 @@ const s = {
 
   error: { color: '#dc2626', fontSize: '0.875rem' },
   muted: { color: '#6b7280', fontSize: '0.875rem' },
+
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+  modal: { background: '#fff', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', padding: '1.75rem', width: '100%', maxWidth: 640, maxHeight: '90vh', display: 'flex', flexDirection: 'column', position: 'relative' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexShrink: 0 },
+  modalTitle: { margin: 0, fontSize: '1rem', fontWeight: 700, color: '#111827' },
+  editBtn: { padding: '0.375rem 0.875rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 },
+  modalBodyScroll: { overflowY: 'auto', flex: 1 },
+  modalTable: { width: '100%', borderCollapse: 'collapse' },
+  modalRow: { borderBottom: '1px solid #f3f4f6' },
+  modalLabel: { padding: '0.5rem 0.75rem 0.5rem 0', fontSize: '0.8125rem', color: '#6b7280', fontWeight: 500, width: '45%', verticalAlign: 'middle', whiteSpace: 'nowrap' },
+  modalValue: { padding: '0.5rem 0', fontSize: '0.875rem', color: '#111827', width: '55%', verticalAlign: 'middle' },
+  editInput: { width: '100%', padding: '0.375rem 0.625rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', outline: 'none', boxSizing: 'border-box' },
+  modalFooter: { display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem', flexShrink: 0 },
+  primaryBtn: { padding: '0.4375rem 1.25rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
+  cancelBtn: { padding: '0.4375rem 1.25rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem' },
+  saveError: { color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.5rem', flexShrink: 0 },
 }

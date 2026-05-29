@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -49,32 +50,32 @@ type publisherPlacementsResponse struct {
 }
 
 type PlacementDoohItem struct {
-	ID                int64   `json:"id"`
-	PublisherID       int64   `json:"publisher_id"`
-	PlacementID       int64   `json:"placement_id"`
-	PlayerID          string  `json:"player_id"`
-	DeviceID          string  `json:"device_id"`
-	ScreenImgURL      string  `json:"screen_img_url"`
-	Orientation       string  `json:"orientation"`
-	ResolutionWidth   int32   `json:"resolution_width"`
-	ResolutionHeight  int32   `json:"resolution_height"`
-	VenueTypeID       int32   `json:"venue_type_id"`
-	VenueTypeTax      string  `json:"venue_type_tax"`
-	Lat               float64 `json:"lat"`
-	Lon               float64 `json:"lon"`
-	CountryCode       string  `json:"country_code"`
-	Region            string  `json:"region"`
-	City              string  `json:"city"`
-	Zip               string  `json:"zip"`
-	Address           string  `json:"address"`
-	Width             int32   `json:"width"`
-	Height            int32   `json:"height"`
-	MinDuration       int32   `json:"min_duration"`
-	MaxDuration       int32   `json:"max_duration"`
-	AvgWeeklyAudience float64 `json:"avg_weekly_audience"`
-	CPM               float64 `json:"cpm"`
-	CurrencyCode      string  `json:"currency_code"`
-	AllowedContent    string  `json:"allowed_content"`
+	ID                int64    `json:"id"`
+	PublisherID       int64    `json:"publisher_id"`
+	PlacementID       int64    `json:"placement_id"`
+	PlayerID          string   `json:"player_id"`
+	DeviceID          string   `json:"device_id"`
+	ScreenImgURL      string   `json:"screen_img_url"`
+	Orientation       string   `json:"orientation"`
+	ResolutionWidth   int32    `json:"resolution_width"`
+	ResolutionHeight  int32    `json:"resolution_height"`
+	VenueTypeID       int32    `json:"venue_type_id"`
+	VenueTypeTax      string   `json:"venue_type_tax"`
+	Lat               float64  `json:"lat"`
+	Lon               float64  `json:"lon"`
+	CountryCode       string   `json:"country_code"`
+	Region            string   `json:"region"`
+	City              string   `json:"city"`
+	Zip               string   `json:"zip"`
+	Address           string   `json:"address"`
+	Width             *int32   `json:"width"`
+	Height            *int32   `json:"height"`
+	MinDuration       *int32   `json:"min_duration"`
+	MaxDuration       *int32   `json:"max_duration"`
+	AvgWeeklyAudience *float64 `json:"avg_weekly_audience"`
+	CPM               *float64 `json:"cpm"`
+	CurrencyCode      string   `json:"currency_code"`
+	AllowedContent    string   `json:"allowed_content"`
 }
 
 type placementDoohsWrapper struct {
@@ -243,13 +244,31 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 }
 
 func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+	placementID := r.PathValue("placementId")
+	accessToken := r.Header.Get("X-Access-Token")
+	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings", placementID)
+
+	if r.Method == http.MethodPut {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+		respBody, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, upstreamPath, accessToken, bodyBytes, "application/json")
+		if err != nil {
+			http.Error(w, "upstream request failed", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		w.Write(respBody)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	placementID := r.PathValue("placementId")
-	accessToken := r.Header.Get("X-Access-Token")
 
 	page, limit, offset := parsePage(r.URL.Query())
 
@@ -263,9 +282,7 @@ func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http
 		params.Set("sort", sort)
 	}
 
-	path := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings?%s", placementID, params.Encode())
-
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath+"?"+params.Encode(), accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return

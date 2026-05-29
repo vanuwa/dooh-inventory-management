@@ -49,7 +49,8 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 			strings.HasPrefix(r.URL.Path, "/api/report/placement/") ||
 			strings.HasPrefix(r.URL.Path, "/api/report/generate/placement/") ||
 			strings.HasPrefix(r.URL.Path, "/api/report/status/") ||
-			(strings.HasPrefix(r.URL.Path, "/api/publishers/") && strings.HasSuffix(r.URL.Path, "/bulk-upload-jobs")) {
+			(strings.HasPrefix(r.URL.Path, "/api/publishers/") && strings.HasSuffix(r.URL.Path, "/bulk-upload-jobs")) ||
+			(strings.HasPrefix(r.URL.Path, "/api/publishers/") && strings.HasSuffix(r.URL.Path, "/dooh-settings")) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -64,7 +65,7 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 func corsMiddleware(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token")
 
 		if r.Method == http.MethodOptions {
