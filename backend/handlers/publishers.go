@@ -35,10 +35,13 @@ type publishersListResponse struct {
 }
 
 type PublisherPlacement struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	PlacementStatus bool   `json:"placement_status"`
-	CreativeType    string `json:"type"`
+	ID                        int64  `json:"id"`
+	Name                      string `json:"name"`
+	PlacementStatus           bool   `json:"placement_status"`
+	PlacementType             string `json:"placement_type"`
+	InventoryID               int64  `json:"inventory_id"`
+	InventoryName             string `json:"inventory_name"`
+	InventoryPlatformTypeName string `json:"inventory_platform_type_name"`
 }
 
 type publisherPlacementsWrapper struct {

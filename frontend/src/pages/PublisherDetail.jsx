@@ -158,7 +158,9 @@ export default function PublisherDetail() {
                           <tr>
                             <th style={s.th}>ID</th>
                             <th style={s.th}>Name</th>
-                            <th style={s.th}>Creative Type</th>
+                            <th style={s.th}>Type</th>
+                            <th style={s.th}>Site</th>
+                            <th style={s.th}>Platform</th>
                             <th style={s.th}>Status</th>
                           </tr>
                         </thead>
@@ -172,7 +174,9 @@ export default function PublisherDetail() {
                             >
                               <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
                               <td style={s.td}>{pl.name}</td>
-                              <td style={s.td}>{pl.type || '—'}</td>
+                              <td style={s.td}>{pl.placement_type || '—'}</td>
+                              <td style={s.td}>{pl.inventory_name ? `${pl.inventory_name} (${pl.inventory_id})` : '—'}</td>
+                              <td style={s.td}>{pl.inventory_platform_type_name || '—'}</td>
                               <td style={s.td}><StatusBadge active={pl.placement_status} /></td>
                             </tr>
                           ))}
