@@ -23,8 +23,11 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
 - Login with SSP credentials (OAuth2 password grant)
 - Paginated, searchable publishers list with active/inactive filter
 - Publisher detail page showing metadata and all linked placements (filterable/searchable client-side)
-- Placement detail page showing all linked screens in a wide scrollable grid with server-side search and pagination
-- Automatic token refresh — sessions stay alive without re-login
+- Publisher detail page with a Bulk Upload Jobs tab — lists jobs, shows per-task breakdown and error messages in a detail modal, and lets you upload a new file
+- Placement detail page with two tabs (URL-reflected):
+  - **Screens** — server-side paginated grid; click any row to open a view/edit modal with full screen details; download all screens as CSV
+  - **Reporting** — generate and download a CSV performance report for the placement
+- Automatic token refresh — handled client-side via response headers, sessions stay alive without re-login
 
 ---
 
@@ -120,6 +123,11 @@ make rebuild-ui    # rebuild only the frontend container
 | `GET` | `/api/publishers` | Paginated publishers list (`page`, `limit`, `search`, `active`) |
 | `GET` | `/api/publishers/{id}` | Single publisher detail |
 | `GET` | `/api/publishers/{id}/placements` | All placements for a publisher |
-| `GET` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Paginated screens for a placement (`page`, `limit`, `search`) |
+| `GET` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Paginated screens for a placement (`page`, `limit`, `search`, `sort`) |
+| `POST` | `/api/report/placement/{publisherId}/{placementId}` | Synchronous report preview (up to 500 rows) |
+| `POST` | `/api/report/generate/placement/{publisherId}/{placementId}` | Start async CSV report generation |
+| `GET` | `/api/report/status/{reportGenerationId}` | Poll generation status until `FINISHED_OK` |
+| `GET` | `/api/publishers/{publisherId}/bulk-upload-jobs` | List bulk upload jobs for a publisher |
+| `POST` | `/api/publishers/{publisherId}/bulk-upload-jobs` | Upload a new bulk job file (multipart, max 50 MB) |
 
-All proxy endpoints are read-only (non-GET requests are rejected with 405). Token refresh is handled transparently by the backend on every request.
+All proxy endpoints are read-only (non-GET requests are rejected with 405) except auth, report generation, and bulk upload. Token refresh is handled client-side via `X-New-Access-Token` / `X-New-Refresh-Token` response headers.
