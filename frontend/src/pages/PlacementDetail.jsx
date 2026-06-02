@@ -99,8 +99,10 @@ export default function PlacementDetail() {
   const [csvLoading, setCsvLoading] = useState(false)
   const [csvError, setCsvError] = useState('')
   const csvAbortRef = useRef(false)
+  const [groupBy, setGroupBy] = useState('day')
 
   useEffect(() => () => { csvAbortRef.current = true }, [])
+  useEffect(() => { setReportRows([]); setReportLoaded(false) }, [groupBy])
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -171,7 +173,7 @@ export default function PlacementDetail() {
     try {
       const res = await apiFetch(`/report/placement/${publisherId}/${placementId}`, {
         method: 'POST',
-        body: JSON.stringify({ date_range: dateRange }),
+        body: JSON.stringify({ date_range: dateRange, group_by: groupBy }),
       })
       const data = await res.json()
       setReportColumns(data.column_order ?? [])
@@ -193,7 +195,7 @@ export default function PlacementDetail() {
     try {
       const genRes = await apiFetch(`/report/generate/placement/${publisherId}/${placementId}`, {
         method: 'POST',
-        body: JSON.stringify({ date_range: dateRange }),
+        body: JSON.stringify({ date_range: dateRange, group_by: groupBy }),
       })
       if (!genRes.ok) {
         setCsvError('Failed to start report generation.')
@@ -546,12 +548,33 @@ export default function PlacementDetail() {
                 </>
               )}
 
+              <div style={s.groupByToggle}>
+                {[['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']].map(([v, label], idx, arr) => (
+                  <button
+                    key={v}
+                    style={{
+                      padding: '0.4375rem 0.75rem',
+                      background: groupBy === v ? '#1a1a2e' : '#fff',
+                      color: groupBy === v ? '#fff' : '#374151',
+                      border: 'none',
+                      borderRight: idx < arr.length - 1 ? '1px solid #d1d5db' : 'none',
+                      cursor: 'pointer',
+                      fontSize: '0.8125rem',
+                      fontWeight: groupBy === v ? 500 : 400,
+                    }}
+                    onClick={() => setGroupBy(v)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <button style={s.loadBtn} onClick={fetchReport} disabled={reportLoading}>
                 Load Report
               </button>
 
               {reportLoaded && reportRows.length > 0 && (
-                <button style={s.csvBtn} onClick={downloadCSV} disabled={reportLoading || csvLoading}>
+                <button style={{ ...s.csvBtn, marginLeft: 'auto' }} onClick={downloadCSV} disabled={reportLoading || csvLoading}>
                   {csvLoading ? <><span style={s.spinnerSm} />Generating…</> : 'Download CSV'}
                 </button>
               )}
@@ -634,6 +657,7 @@ const s = {
     color: '#111827',
     outline: 'none',
   },
+  groupByToggle: { display: 'flex', border: '1px solid #d1d5db', borderRadius: 4, overflow: 'hidden' },
   loadBtn: { padding: '0.4375rem 1rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   spinnerLg: { display: 'inline-block', width: 36, height: 36, border: '3px solid rgba(26,26,46,0.15)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite' },
   loadingOverlay: { position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, zIndex: 1 },
