@@ -25,36 +25,29 @@ func newHandler(cfg *config.Config) http.Handler {
 	bulkUploadJobsHandler := handlers.NewBulkUploadJobsHandler(cfg)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/auth/login", authHandler.Login)
-	mux.HandleFunc("/api/auth/refresh", authHandler.Refresh)
-	mux.HandleFunc("/api/user/details", proxyHandler.UserDetails)
-	mux.HandleFunc("/api/publishers", publishersHandler.Publishers)
-	mux.HandleFunc("/api/publishers/{id}", publishersHandler.Publisher)
-	mux.HandleFunc("/api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
-	mux.HandleFunc("/api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PlacementDoohSettings)
-	mux.HandleFunc("/api/report/placement/{publisherId}/{placementId}", reportHandler.PlacementReport)
-	mux.HandleFunc("/api/report/generate/placement/{publisherId}/{placementId}", reportHandler.GeneratePlacementReport)
-	mux.HandleFunc("/api/report/status/{reportGenerationId}", reportHandler.PlacementReportStatus)
-	mux.HandleFunc("/api/report/publisher/{publisherId}", reportHandler.PublisherReport)
-	mux.HandleFunc("/api/report/generate/publisher/{publisherId}", reportHandler.GeneratePublisherReport)
-	mux.HandleFunc("/api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.Jobs)
+	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+	mux.HandleFunc("POST /api/auth/refresh", authHandler.Refresh)
+	mux.HandleFunc("GET /api/user/details", proxyHandler.UserDetails)
+	mux.HandleFunc("GET /api/publishers", publishersHandler.Publishers)
+	mux.HandleFunc("GET /api/publishers/{id}", publishersHandler.Publisher)
+	mux.HandleFunc("GET /api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
+	mux.HandleFunc("GET /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.GetPlacementDoohSettings)
+	mux.HandleFunc("PUT /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PutPlacementDoohSettings)
+	mux.HandleFunc("POST /api/report/placement/{publisherId}/{placementId}", reportHandler.PlacementReport)
+	mux.HandleFunc("POST /api/report/generate/placement/{publisherId}/{placementId}", reportHandler.GeneratePlacementReport)
+	mux.HandleFunc("GET /api/report/status/{reportGenerationId}", reportHandler.PlacementReportStatus)
+	mux.HandleFunc("POST /api/report/publisher/{publisherId}", reportHandler.PublisherReport)
+	mux.HandleFunc("POST /api/report/generate/publisher/{publisherId}", reportHandler.GeneratePublisherReport)
+	mux.HandleFunc("GET /api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.ListJobs)
+	mux.HandleFunc("POST /api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.CreateJob)
 
 	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
 }
 
-// readOnlyMiddleware blocks all non-GET methods on proxy endpoints.
-// The auth login endpoint is exempt since it requires POST.
+// readOnlyMiddleware blocks all non-GET methods except on the paths listed in writeAllowed.
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/auth/login" ||
-			r.URL.Path == "/api/auth/refresh" ||
-			strings.HasPrefix(r.URL.Path, "/api/report/placement/") ||
-			strings.HasPrefix(r.URL.Path, "/api/report/generate/placement/") ||
-			strings.HasPrefix(r.URL.Path, "/api/report/publisher/") ||
-			strings.HasPrefix(r.URL.Path, "/api/report/generate/publisher/") ||
-			strings.HasPrefix(r.URL.Path, "/api/report/status/") ||
-			(strings.HasPrefix(r.URL.Path, "/api/publishers/") && strings.HasSuffix(r.URL.Path, "/bulk-upload-jobs")) ||
-			(strings.HasPrefix(r.URL.Path, "/api/publishers/") && strings.HasSuffix(r.URL.Path, "/dooh-settings")) {
+		if writeAllowed(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -64,6 +57,31 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// writeAllowed lists the path prefixes that accept non-GET requests.
+// Add new entries here explicitly when registering write-capable routes.
+func writeAllowed(path string) bool {
+	switch path {
+	case "/api/auth/login", "/api/auth/refresh":
+		return true
+	}
+	for _, pfx := range []string{
+		"/api/report/placement/",
+		"/api/report/generate/placement/",
+		"/api/report/publisher/",
+		"/api/report/generate/publisher/",
+		"/api/report/status/",
+	} {
+		if strings.HasPrefix(path, pfx) {
+			return true
+		}
+	}
+	if strings.HasPrefix(path, "/api/publishers/") {
+		return strings.HasSuffix(path, "/bulk-upload-jobs") ||
+			strings.HasSuffix(path, "/dooh-settings")
+	}
+	return false
 }
 
 func corsMiddleware(origin string, next http.Handler) http.Handler {

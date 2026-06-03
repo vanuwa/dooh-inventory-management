@@ -1,6 +1,100 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api.js'
 import JobStatusBadge from './JobStatusBadge.jsx'
+import { tableStyles } from '../styles/tables.js'
+
+function JobDetailsModal({ job, onClose }) {
+  const tasks = job.tasks ?? []
+  const completedCount = tasks.filter(t => t.status === 'TASK_COMPLETED').length
+  const failedTasks = tasks.filter(t => t.status !== 'TASK_COMPLETED')
+  return (
+    <div style={s.overlay} onClick={onClose}>
+      <div style={s.modal} onClick={e => e.stopPropagation()}>
+        <h3 style={s.modalTitle}>Job #{job.id} Details</h3>
+
+        <div style={s.modalSection}>
+          <div style={s.modalRow}>
+            <span style={s.modalLabel}>Job Type</span>
+            <span style={s.modalValue}>{job.job_type || '—'}</span>
+          </div>
+          <div style={s.modalRow}>
+            <span style={s.modalLabel}>File MIME Type</span>
+            <span style={s.modalValue}>{job.mime_type || '—'}</span>
+          </div>
+          <div style={s.modalRow}>
+            <span style={s.modalLabel}>Status</span>
+            <JobStatusBadge status={job.job_status} />
+          </div>
+          <div style={s.modalRow}>
+            <span style={s.modalLabel}>% Done</span>
+            <span style={s.modalValue}>{job.percentage_done != null ? `${job.percentage_done}%` : '—'}</span>
+          </div>
+          {job.error_messages?.length > 0 && (
+            <div style={s.modalRow}>
+              <span style={s.modalLabel}>Errors</span>
+              <ul style={s.errorList}>
+                {job.error_messages.map((msg, i) => (
+                  <li key={i} style={s.errorItem}>{msg}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div style={s.taskSummary}>
+          <span style={s.taskCompleted}>{completedCount} Tasks Completed ✓</span>
+          <span style={s.taskFailed}>{failedTasks.length} Tasks Failed ✗</span>
+        </div>
+
+        {failedTasks.length > 0 && (
+          <div style={s.taskTableWrapper}>
+            <table style={s.taskHeaderTable}>
+              <colgroup>
+                <col style={{ width: '55%' }} />
+                <col style={{ width: '45%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style={s.th}>Failed Task Description</th>
+                  <th style={s.th}>Error Message</th>
+                </tr>
+              </thead>
+            </table>
+            <div style={s.taskBodyScroll}>
+              <table style={s.taskBodyTable}>
+                <colgroup>
+                  <col style={{ width: '55%' }} />
+                  <col style={{ width: '45%' }} />
+                </colgroup>
+                <tbody>
+                  {failedTasks.map((task, i) => (
+                    <tr key={task.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
+                      <td style={s.tdMono}>{task.task_description || '—'}</td>
+                      <td style={s.td}>
+                        {(task.error_messages ?? []).length === 0
+                          ? '—'
+                          : <ul style={s.errorList}>
+                              {task.error_messages.map((msg, j) => (
+                                <li key={j} style={s.errorItem}>{msg}</li>
+                              ))}
+                            </ul>
+                        }
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div style={s.modalFooter}>
+          <button style={s.closeBtn} onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function BulkUploadJobsTab({ publisherId }) {
   const [jobs, setJobs] = useState([])
@@ -178,107 +272,13 @@ export default function BulkUploadJobsTab({ publisherId }) {
           )}
         </>
       )}
-      {selectedJob && (
-        <div style={s.overlay} onClick={handleCloseModal}>
-          <div style={s.modal} onClick={e => e.stopPropagation()}>
-            {(() => {
-              const tasks          = selectedJob.tasks ?? []
-              const completedCount = tasks.filter(t => t.status === 'TASK_COMPLETED').length
-              const failedTasks    = tasks.filter(t => t.status !== 'TASK_COMPLETED')
-              return (
-                <>
-                  <h3 style={s.modalTitle}>Job #{selectedJob.id} Details</h3>
-
-                  <div style={s.modalSection}>
-                    <div style={s.modalRow}>
-                      <span style={s.modalLabel}>Job Type</span>
-                      <span style={s.modalValue}>{selectedJob.job_type || '—'}</span>
-                    </div>
-                    <div style={s.modalRow}>
-                      <span style={s.modalLabel}>File MIME Type</span>
-                      <span style={s.modalValue}>{selectedJob.mime_type || '—'}</span>
-                    </div>
-                    <div style={s.modalRow}>
-                      <span style={s.modalLabel}>Status</span>
-                      <JobStatusBadge status={selectedJob.job_status} />
-                    </div>
-                    <div style={s.modalRow}>
-                      <span style={s.modalLabel}>% Done</span>
-                      <span style={s.modalValue}>{selectedJob.percentage_done != null ? `${selectedJob.percentage_done}%` : '—'}</span>
-                    </div>
-                    {selectedJob.error_messages?.length > 0 && (
-                      <div style={s.modalRow}>
-                        <span style={s.modalLabel}>Errors</span>
-                        <ul style={s.errorList}>
-                          {selectedJob.error_messages.map((msg, i) => (
-                            <li key={i} style={s.errorItem}>{msg}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={s.taskSummary}>
-                    <span style={s.taskCompleted}>{completedCount} Tasks Completed ✓</span>
-                    <span style={s.taskFailed}>{failedTasks.length} Tasks Failed ✗</span>
-                  </div>
-
-                  {failedTasks.length > 0 && (
-                    <div style={s.taskTableWrapper}>
-                      <table style={s.taskHeaderTable}>
-                        <colgroup>
-                          <col style={{ width: '55%' }} />
-                          <col style={{ width: '45%' }} />
-                        </colgroup>
-                        <thead>
-                          <tr>
-                            <th style={s.th}>Failed Task Description</th>
-                            <th style={s.th}>Error Message</th>
-                          </tr>
-                        </thead>
-                      </table>
-                      <div style={s.taskBodyScroll}>
-                        <table style={s.taskBodyTable}>
-                          <colgroup>
-                            <col style={{ width: '55%' }} />
-                            <col style={{ width: '45%' }} />
-                          </colgroup>
-                          <tbody>
-                            {failedTasks.map((task, i) => (
-                              <tr key={task.id} style={i % 2 !== 0 ? s.rowAlt : undefined}>
-                                <td style={s.tdMono}>{task.task_description || '—'}</td>
-                                <td style={s.td}>
-                                  {(task.error_messages ?? []).length === 0
-                                    ? '—'
-                                    : <ul style={s.errorList}>
-                                        {task.error_messages.map((msg, j) => (
-                                          <li key={j} style={s.errorItem}>{msg}</li>
-                                        ))}
-                                      </ul>
-                                  }
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={s.modalFooter}>
-                    <button style={s.closeBtn} onClick={handleCloseModal}>Close</button>
-                  </div>
-                </>
-              )
-            })()}
-          </div>
-        </div>
-      )}
+      {selectedJob && <JobDetailsModal job={selectedJob} onClose={handleCloseModal} />}
     </>
   )
 }
 
 const s = {
+  ...tableStyles,
   formCard: { background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', padding: '1.25rem 1.375rem', marginBottom: '2rem' },
   formTitle: { margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600, color: '#374151' },
   formRow: { display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.375rem 0', marginBottom: '0.5rem' },
@@ -292,16 +292,7 @@ const s = {
   sectionTitle: { margin: '0 0 1rem', fontSize: '1rem', fontWeight: 600, color: '#374151' },
   refreshBtn: { padding: '0.375rem 0.75rem', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem' },
 
-  tableWrapper: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', borderRadius: 8, overflow: 'hidden' },
-  th: { padding: '0.75rem 1rem', background: '#f9fafb', fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#6b7280', textAlign: 'left', borderBottom: '1px solid #e5e7eb' },
-  td: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#111827', borderBottom: '1px solid #f3f4f6' },
-  rowAlt: { background: '#fafafa' },
   idTag: { color: '#6b7280', fontWeight: 400 },
-
-  pagination: { display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' },
-  pageBtn: { padding: '0.375rem 0.875rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem' },
-  pageInfo: { fontSize: '0.875rem', color: '#6b7280' },
 
   error: { color: '#dc2626', fontSize: '0.875rem' },
   muted: { color: '#6b7280', fontSize: '0.875rem' },

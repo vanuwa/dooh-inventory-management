@@ -59,18 +59,7 @@ func NewBulkUploadJobsHandler(cfg *config.Config) *BulkUploadJobsHandler {
 	return &BulkUploadJobsHandler{cfg: cfg}
 }
 
-func (h *BulkUploadJobsHandler) Jobs(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.listJobs(w, r)
-	case http.MethodPost:
-		h.createJob(w, r)
-	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (h *BulkUploadJobsHandler) listJobs(w http.ResponseWriter, r *http.Request) {
+func (h *BulkUploadJobsHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	publisherID := r.PathValue("publisherId")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -101,13 +90,9 @@ func (h *BulkUploadJobsHandler) listJobs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	total := wrapper.TotalNumberOfElemements
-	if total == 0 {
-		total = int(parseX360ContentRange(upHeaders.Get("X-360-Content-Range")))
-	}
+	total := int(resolveTotal(int64(wrapper.TotalNumberOfElemements), upHeaders.Get("X-360-Content-Range")))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(bulkUploadJobsResponse{
+	writeJSON(w, bulkUploadJobsResponse{
 		Jobs:  wrapper.BulkUploadJobs,
 		Total: total,
 		Page:  page,
@@ -115,7 +100,7 @@ func (h *BulkUploadJobsHandler) listJobs(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (h *BulkUploadJobsHandler) createJob(w http.ResponseWriter, r *http.Request) {
+func (h *BulkUploadJobsHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	publisherID := r.PathValue("publisherId")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -136,9 +121,5 @@ func (h *BulkUploadJobsHandler) createJob(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if ct := upHeaders.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, upHeaders)
 }

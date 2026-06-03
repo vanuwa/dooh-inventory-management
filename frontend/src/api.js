@@ -45,14 +45,11 @@ export async function apiFetch(path, options = {}, _retried = false) {
 
   const response = await fetch('/api' + path, { ...options, headers })
 
-  if (response.status === 401 && !_retried) {
-    const ok = await refreshTokens()
-    if (ok) return apiFetch(path, options, true)
-    if (onUnauthorized) onUnauthorized()
-    throw new Error('Unauthorized')
-  }
-
   if (response.status === 401) {
+    if (!_retried) {
+      const ok = await refreshTokens()
+      if (ok) return apiFetch(path, options, true)
+    }
     if (onUnauthorized) onUnauthorized()
     throw new Error('Unauthorized')
   }

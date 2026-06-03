@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -19,10 +20,6 @@ func NewProxyHandler(cfg *config.Config) *ProxyHandler {
 
 // UserDetails handles GET /api/user/details.
 func (h *ProxyHandler) UserDetails(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	h.proxy(w, r, http.MethodGet, "/common/v1/user-details")
 }
 
@@ -36,6 +33,15 @@ func (h *ProxyHandler) proxy(w http.ResponseWriter, r *http.Request, method, ups
 		return
 	}
 
+	writeProxyResponse(w, status, body, headers)
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeProxyResponse(w http.ResponseWriter, status int, body []byte, headers http.Header) {
 	if ct := headers.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

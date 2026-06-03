@@ -115,6 +115,13 @@ func parseX360ContentRange(cr string) int64 {
 	return n
 }
 
+func resolveTotal(n int64, contentRange string) int64 {
+	if n == 0 {
+		return parseX360ContentRange(contentRange)
+	}
+	return n
+}
+
 func parsePage(q url.Values) (page, limit, offset int) {
 	page, limit = 1, 20
 	if n, err := strconv.Atoi(q.Get("page")); err == nil && n > 0 {
@@ -130,11 +137,6 @@ func parsePage(q url.Values) (page, limit, offset int) {
 }
 
 func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	accessToken := r.Header.Get("X-Access-Token")
 
 	page, limit, offset := parsePage(r.URL.Query())
@@ -170,13 +172,9 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total := wrapper.TotalNumberOfElemements
-	if total == 0 {
-		total = int(parseX360ContentRange(upHeaders.Get("X-360-Content-Range")))
-	}
+	total := int(resolveTotal(int64(wrapper.TotalNumberOfElemements), upHeaders.Get("X-360-Content-Range")))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(publishersListResponse{
+	writeJSON(w, publishersListResponse{
 		Publishers: wrapper.Publishers,
 		Total:      total,
 		Page:       page,
@@ -185,11 +183,6 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	id := r.PathValue("id")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -213,11 +206,6 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	id := r.PathValue("id")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -240,38 +228,15 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(publisherPlacementsResponse{
+	writeJSON(w, publisherPlacementsResponse{
 		Placements: wrapper.Placements,
 	})
 }
 
-func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+func (h *PublishersHandler) GetPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
 	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings", placementID)
-
-	if r.Method == http.MethodPut {
-		bodyBytes, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "failed to read request body", http.StatusBadRequest)
-			return
-		}
-		respBody, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, upstreamPath, accessToken, bodyBytes, "application/json")
-		if err != nil {
-			http.Error(w, "upstream request failed", http.StatusBadGateway)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		w.Write(respBody)
-		return
-	}
-
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	page, limit, offset := parsePage(r.URL.Query())
 
@@ -302,16 +267,32 @@ func (h *PublishersHandler) PlacementDoohSettings(w http.ResponseWriter, r *http
 		return
 	}
 
-	total := wrapper.TotalNumberOfElemements
-	if total == 0 {
-		total = parseX360ContentRange(upHeaders.Get("X-360-Content-Range"))
-	}
+	total := resolveTotal(wrapper.TotalNumberOfElemements, upHeaders.Get("X-360-Content-Range"))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(placementDoohsResponse{
+	writeJSON(w, placementDoohsResponse{
 		DoohSettings: wrapper.DoohSettings,
 		Total:        total,
 		Page:         page,
 		Limit:        limit,
 	})
+}
+
+func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+	placementID := r.PathValue("placementId")
+	accessToken := r.Header.Get("X-Access-Token")
+	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings", placementID)
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	respBody, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, upstreamPath, accessToken, bodyBytes, "application/json")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(respBody)
 }

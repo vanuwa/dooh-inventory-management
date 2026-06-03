@@ -1,16 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import BulkUploadJobsTab from '../components/BulkUploadJobsTab.jsx'
+import ReportingTab from '../components/ReportingTab.jsx'
 import { tabStyles } from '../styles/tabs.js'
-
-const yesterdayStr = (() => {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().split('T')[0]
-})()
+import { tableStyles } from '../styles/tables.js'
 
 export default function PublisherDetail() {
   const { id } = useParams()
@@ -31,21 +27,6 @@ export default function PublisherDetail() {
   const [placementActiveFilter, setPlacementActiveFilter] = useState('')
   const [placementPage, setPlacementPage] = useState(1)
   const placementsPerPage = 20
-
-  // reporting tab
-  const [quickAlias, setQuickAlias] = useState('LAST_7_DAYS')
-  const [dateRangeType, setDateRangeType] = useState('quick')
-  const [customStart, setCustomStart] = useState('')
-  const [customEnd, setCustomEnd] = useState('')
-  const [reportColumns, setReportColumns] = useState([])
-  const [reportRows, setReportRows] = useState([])
-  const [reportLoading, setReportLoading] = useState(false)
-  const [reportError, setReportError] = useState('')
-  const [reportLoaded, setReportLoaded] = useState(false)
-  const [groupBy, setGroupBy] = useState('day')
-  const [csvLoading, setCsvLoading] = useState(false)
-  const [csvError, setCsvError] = useState('')
-  const csvAbortRef = useRef(false)
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -78,98 +59,6 @@ export default function PublisherDetail() {
     return () => controller.abort()
   }, [id])
 
-  useEffect(() => () => { csvAbortRef.current = true }, [])
-  useEffect(() => { setReportRows([]); setReportLoaded(false) }, [groupBy])
-
-  function buildDateRange() {
-    return dateRangeType === 'quick'
-      ? { quick: quickAlias }
-      : { fixed: { start_date: customStart, end_date: customEnd } }
-  }
-
-  async function fetchReport() {
-    setReportLoading(true)
-    setReportError('')
-    setCsvError('')
-    const dateRange = buildDateRange()
-    try {
-      const res = await apiFetch(`/report/publisher/${id}`, {
-        method: 'POST',
-        body: JSON.stringify({ date_range: dateRange, group_by: groupBy }),
-      })
-      const data = await res.json()
-      setReportColumns(data.column_order ?? [])
-      setReportRows(data.rows ?? [])
-      setReportLoaded(true)
-    } catch (err) {
-      if (err.message !== 'Unauthorized') setReportError('Failed to load report.')
-      setReportLoaded(false)
-    } finally {
-      setReportLoading(false)
-    }
-  }
-
-  async function downloadCSV() {
-    csvAbortRef.current = false
-    setCsvLoading(true)
-    setCsvError('')
-    const dateRange = buildDateRange()
-    try {
-      const genRes = await apiFetch(`/report/generate/publisher/${id}`, {
-        method: 'POST',
-        body: JSON.stringify({ date_range: dateRange, group_by: groupBy }),
-      })
-      if (!genRes.ok) {
-        setCsvError('Failed to start report generation.')
-        return
-      }
-      const genData = await genRes.json()
-      if (!genData.report_generation_id) {
-        setCsvError('Failed to start report generation.')
-        return
-      }
-      for (let i = 0; i < 60; i++) {
-        await new Promise(r => setTimeout(r, 2000))
-        if (csvAbortRef.current) return
-        const statusRes = await apiFetch(`/report/status/${genData.report_generation_id}`)
-        if (csvAbortRef.current) return
-        if (!statusRes.ok) {
-          setCsvError('Failed to check report status.')
-          return
-        }
-        const statusData = await statusRes.json()
-        if (statusData.status_name === 'FINISHED_OK') {
-          const a = document.createElement('a')
-          a.href = statusData.report_download_url
-          a.style.display = 'none'
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          return
-        }
-        if (statusData.status_name === 'FAILED') {
-          setCsvError(statusData.error || 'Report generation failed.')
-          return
-        }
-      }
-      setCsvError('Report generation timed out.')
-    } catch (err) {
-      if (err.message !== 'Unauthorized') setCsvError('Failed to download report.')
-    } finally {
-      if (!csvAbortRef.current) setCsvLoading(false)
-    }
-  }
-
-  function handleQuickChange(e) {
-    const val = e.target.value
-    if (val === 'custom') {
-      setDateRangeType('fixed')
-    } else {
-      setDateRangeType('quick')
-      setQuickAlias(val)
-    }
-  }
-
   const lowerSearch = placementSearch.toLowerCase()
   const filteredPlacements = placements.filter(pl => {
     if (placementActiveFilter === 'true' && !pl.placement_status) return false
@@ -195,7 +84,6 @@ export default function PublisherDetail() {
 
   return (
     <Layout user={user}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <main style={s.main}>
         <Link to="/publishers" style={s.backLink}>← Publishers</Link>
 
@@ -326,118 +214,10 @@ export default function PublisherDetail() {
             {activeTab === 'bulk-upload-jobs' && <BulkUploadJobsTab publisherId={id} />}
 
             {activeTab === 'reporting' && (
-              <>
-                <div style={s.reportControls}>
-                  <select
-                    value={dateRangeType === 'fixed' ? 'custom' : quickAlias}
-                    onChange={handleQuickChange}
-                    style={s.reportSelect}
-                  >
-                    <option value="YESTERDAY">Yesterday</option>
-                    <option value="LAST_7_DAYS">Last 7 Days</option>
-                    <option value="LAST_14_DAYS">Last 14 Days</option>
-                    <option value="LAST_31_DAYS">Last 31 Days</option>
-                    <option value="LAST_90_DAYS">Last 90 Days</option>
-                    <option value="THIS_WEEK">This Week</option>
-                    <option value="LAST_WEEK">Last Week</option>
-                    <option value="THIS_MONTH">This Month</option>
-                    <option value="LAST_MONTH">Last Month</option>
-                    <option value="LAST_3_MONTHS">Last 3 Months</option>
-                    <option value="LAST_6_MONTHS">Last 6 Months</option>
-                    <option disabled>──────────</option>
-                    <option value="custom">Custom range</option>
-                  </select>
-
-                  {dateRangeType === 'fixed' && (
-                    <>
-                      <input type="date" value={customStart} max={yesterdayStr} onChange={e => setCustomStart(e.target.value)} style={s.reportSelect} />
-                      <input type="date" value={customEnd} max={yesterdayStr} onChange={e => setCustomEnd(e.target.value)} style={s.reportSelect} />
-                    </>
-                  )}
-
-                  <div style={s.groupByToggle}>
-                    {[['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']].map(([v, label], idx, arr) => (
-                      <button
-                        key={v}
-                        style={{
-                          padding: '0.4375rem 0.75rem',
-                          background: groupBy === v ? '#1a1a2e' : '#fff',
-                          color: groupBy === v ? '#fff' : '#374151',
-                          border: 'none',
-                          borderRight: idx < arr.length - 1 ? '1px solid #d1d5db' : 'none',
-                          cursor: 'pointer',
-                          fontSize: '0.8125rem',
-                          fontWeight: groupBy === v ? 500 : 400,
-                        }}
-                        onClick={() => setGroupBy(v)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <button style={s.loadBtn} onClick={fetchReport} disabled={reportLoading}>
-                    Load Report
-                  </button>
-
-                  {reportLoaded && reportRows.length > 0 && (
-                    <button style={{ ...s.csvBtn, marginLeft: 'auto' }} onClick={downloadCSV} disabled={reportLoading || csvLoading}>
-                      {csvLoading ? <><span style={s.spinnerSm} />Generating…</> : 'Download CSV'}
-                    </button>
-                  )}
-                </div>
-
-                {reportError && <p style={s.error}>{reportError}</p>}
-                {csvError && <p style={s.error}>{csvError}</p>}
-
-                {!reportLoaded && !reportLoading && !reportError && (
-                  <p style={s.muted}>Select a date range and click Load Report.</p>
-                )}
-
-                {reportLoading && !reportLoaded && (
-                  <div style={s.spinnerCenter}>
-                    <span style={s.spinnerLg} />
-                  </div>
-                )}
-
-                {reportLoaded && reportRows.length === 0 && !reportLoading && (
-                  <p style={s.muted}>No data for this period.</p>
-                )}
-
-                {reportLoaded && reportRows.length > 0 && (
-                  <div style={{ position: 'relative' }}>
-                    {reportLoading && (
-                      <div style={s.loadingOverlay}>
-                        <span style={s.spinnerLg} />
-                      </div>
-                    )}
-                    <div style={{ ...s.tableWrapper, opacity: reportLoading ? 0.4 : 1, transition: 'opacity 0.2s' }}>
-                      <table style={s.table}>
-                        <thead>
-                          <tr>
-                            {reportColumns.map(c => (
-                              <th key={c.id} style={s.th}>{c.display}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {reportRows.map((row, i) => (
-                            <tr key={i} style={i % 2 !== 0 ? s.rowAlt : undefined}>
-                              {reportColumns.map(c => (
-                                <td key={c.id} style={s.td}>
-                                  {c.id === 'revenue'
-                                    ? (row[c.id] != null ? parseFloat(row[c.id]).toFixed(2) : '—')
-                                    : (row[c.id] ?? '—')}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </>
+              <ReportingTab
+                previewUrl={`/report/publisher/${id}`}
+                generateUrl={`/report/generate/publisher/${id}`}
+              />
             )}
           </>
         )}
@@ -447,6 +227,7 @@ export default function PublisherDetail() {
 }
 
 const s = {
+  ...tableStyles,
   main: { padding: '2.5rem 1.5rem', maxWidth: '100%', margin: '0 auto' },
   backLink: { display: 'inline-block', marginBottom: '1.5rem', color: '#4338ca', fontSize: '0.875rem', textDecoration: 'none', fontWeight: 500 },
 
@@ -463,26 +244,7 @@ const s = {
   searchInput: { flex: 1, maxWidth: 280, padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', outline: 'none' },
   select: { padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', background: '#fff', cursor: 'pointer' },
 
-  reportControls: { display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' },
-  reportSelect: { padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', outline: 'none', background: '#fff' },
-  groupByToggle: { display: 'flex', border: '1px solid #d1d5db', borderRadius: 4, overflow: 'hidden' },
-  loadBtn: { padding: '0.4375rem 1rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
-  csvBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' },
-  spinnerSm: { display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(26,26,46,0.2)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 },
-  spinnerLg: { display: 'inline-block', width: 36, height: 36, border: '3px solid rgba(26,26,46,0.15)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite' },
-  spinnerCenter: { display: 'flex', justifyContent: 'center', padding: '3rem 0' },
-  loadingOverlay: { position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, zIndex: 1 },
-
-  tableWrapper: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', borderRadius: 8, overflow: 'hidden' },
-  th: { padding: '0.75rem 1rem', background: '#f9fafb', fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#6b7280', textAlign: 'left', borderBottom: '1px solid #e5e7eb' },
-  td: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#111827', borderBottom: '1px solid #f3f4f6' },
-  rowAlt: { background: '#fafafa' },
   idTag: { color: '#6b7280', fontWeight: 400 },
-
-  pagination: { display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' },
-  pageBtn: { padding: '0.375rem 0.875rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem' },
-  pageInfo: { fontSize: '0.875rem', color: '#6b7280' },
 
   error: { color: '#dc2626', fontSize: '0.875rem' },
   muted: { color: '#6b7280', fontSize: '0.875rem' },

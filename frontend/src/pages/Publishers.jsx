@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
+import { tableStyles } from '../styles/tables.js'
 
 const badge = {
   display: 'inline-block',
@@ -158,6 +159,7 @@ export default function Publishers() {
 }
 
 const s = {
+  ...tableStyles,
   main: { padding: '2.5rem 1.5rem' },
 
   controls: { display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' },
@@ -181,41 +183,7 @@ const s = {
     cursor: 'pointer',
   },
 
-  tableWrapper: { overflowX: 'auto' },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    background: '#fff',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  th: {
-    padding: '0.75rem 1rem',
-    background: '#f9fafb',
-    fontSize: '0.6875rem',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.07em',
-    color: '#6b7280',
-    textAlign: 'left',
-    borderBottom: '1px solid #e5e7eb',
-  },
-  rowAlt: { background: '#fafafa' },
-  td: { padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#111827', borderBottom: '1px solid #f3f4f6' },
   idTag: { color: '#6b7280', fontWeight: 400 },
-
-  pagination: { display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' },
-  pageBtn: {
-    padding: '0.375rem 0.875rem',
-    background: '#1a1a2e',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: '0.8125rem',
-  },
-  pageInfo: { fontSize: '0.875rem', color: '#6b7280' },
 
   error: { color: '#dc2626', fontSize: '0.875rem' },
   muted: { color: '#6b7280', fontSize: '0.875rem' },

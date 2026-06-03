@@ -104,12 +104,22 @@ func resolveGroupBy(s string) string {
 	return "day"
 }
 
-func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func buildDims(groupBy string, baseDims []string) (timeDim string, dims, colOrder []string) {
+	timeDim = resolveGroupBy(groupBy)
+	dims = append([]string{timeDim}, baseDims...)
+	colOrder = append(append([]string{}, dims...), doohMetrics...)
+	return
+}
 
+func toGenDateRange(r reportDateRange) genDateRange {
+	dr := genDateRange{Quick: r.Quick}
+	if r.Fixed != nil {
+		dr.Fixed = &genFixed{StartDate: r.Fixed.StartDate, EndDate: r.Fixed.EndDate}
+	}
+	return dr
+}
+
+func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) {
 	placementId := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -119,9 +129,7 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	timeDim := resolveGroupBy(req.GroupBy)
-	dims := append([]string{timeDim}, doohDimensions[1:]...)
-	colOrder := append(append([]string{}, dims...), doohMetrics...)
+	timeDim, dims, colOrder := buildDims(req.GroupBy, doohDimensions[1:])
 
 	upstream := reportPreviewReq{
 		Rows: 1000,
@@ -148,19 +156,10 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if ct := headers.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, headers)
 }
 
 func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	placementId := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -170,22 +169,12 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	timeDim := resolveGroupBy(req.GroupBy)
-	dims := append([]string{timeDim}, doohDimensions[1:]...)
-	colOrder := append(append([]string{}, dims...), doohMetrics...)
-
-	dr := genDateRange{Quick: req.DateRange.Quick}
-	if req.DateRange.Fixed != nil {
-		dr.Fixed = &genFixed{
-			StartDate: req.DateRange.Fixed.StartDate,
-			EndDate:   req.DateRange.Fixed.EndDate,
-		}
-	}
+	timeDim, dims, colOrder := buildDims(req.GroupBy, doohDimensions[1:])
 
 	upstream := reportGenBody{
 		ReportType:   "DOOH",
 		ReportFormat: "CSV",
-		DateRange:    dr,
+		DateRange:    toGenDateRange(req.DateRange),
 		Dimensions:   dims,
 		Metrics:      doohMetrics,
 		Filters:      []genFilter{{Column: "placement_id", Operation: "EQUAL", Value: placementId}},
@@ -205,19 +194,10 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if ct := headers.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, headers)
 }
 
 func (h *ReportHandler) PublisherReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	publisherIdStr := r.PathValue("publisherId")
 	publisherIdInt, err := strconv.ParseInt(publisherIdStr, 10, 64)
 	if err != nil {
@@ -232,9 +212,7 @@ func (h *ReportHandler) PublisherReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	timeDim := resolveGroupBy(req.GroupBy)
-	dims := append([]string{timeDim}, pubBaseDimensions...)
-	colOrder := append(append([]string{}, dims...), doohMetrics...)
+	timeDim, dims, colOrder := buildDims(req.GroupBy, pubBaseDimensions)
 
 	upstream := reportPreviewReq{
 		Rows: 1000,
@@ -261,19 +239,10 @@ func (h *ReportHandler) PublisherReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if ct := headers.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, headers)
 }
 
 func (h *ReportHandler) GeneratePublisherReport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	publisherIdStr := r.PathValue("publisherId")
 	publisherIdInt, err := strconv.ParseInt(publisherIdStr, 10, 64)
 	if err != nil {
@@ -288,22 +257,12 @@ func (h *ReportHandler) GeneratePublisherReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	timeDim := resolveGroupBy(req.GroupBy)
-	dims := append([]string{timeDim}, pubBaseDimensions...)
-	colOrder := append(append([]string{}, dims...), doohMetrics...)
-
-	dr := genDateRange{Quick: req.DateRange.Quick}
-	if req.DateRange.Fixed != nil {
-		dr.Fixed = &genFixed{
-			StartDate: req.DateRange.Fixed.StartDate,
-			EndDate:   req.DateRange.Fixed.EndDate,
-		}
-	}
+	timeDim, dims, colOrder := buildDims(req.GroupBy, pubBaseDimensions)
 
 	upstream := reportGenBody{
 		ReportType:   "DOOH",
 		ReportFormat: "CSV",
-		DateRange:    dr,
+		DateRange:    toGenDateRange(req.DateRange),
 		PublisherIds: []int64{publisherIdInt},
 		Dimensions:   dims,
 		Metrics:      doohMetrics,
@@ -323,19 +282,10 @@ func (h *ReportHandler) GeneratePublisherReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if ct := headers.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, headers)
 }
 
 func (h *ReportHandler) PlacementReportStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	reportGenerationId := r.PathValue("reportGenerationId")
 	accessToken := r.Header.Get("X-Access-Token")
 
@@ -345,9 +295,5 @@ func (h *ReportHandler) PlacementReportStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if ct := headers.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, headers)
 }
