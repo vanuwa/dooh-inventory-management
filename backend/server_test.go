@@ -731,6 +731,122 @@ func TestPlacementDoohSettings_ContentRangeFallback(t *testing.T) {
 	}
 }
 
+// --- Publisher users ---
+
+const mockUsersListBody = `{"users":[{"id":101,"first_name":"Ivan","last_name":"Test","email":"ivan@test.com","user_type":"Publisher","user_access":"Console","active":true,"lastLoginTime":"2026-06-01T09:00:00Z"}],"totalNumberOfElemements":1}`
+
+func TestPublisherUsers_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
+				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
+			}
+			if got := r.URL.Query().Get("sort"); got != "-id" {
+				t.Errorf("sort: want %q, got %q", "-id", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUsersListBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/users", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Users []map[string]any `json:"users"`
+		Total int64            `json:"total"`
+		Page  int              `json:"page"`
+		Limit int              `json:"limit"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Users) != 1 {
+		t.Errorf("users: want 1, got %d", len(body.Users))
+	}
+	if body.Total != 1 {
+		t.Errorf("total: want 1, got %d", body.Total)
+	}
+	if body.Page != 1 {
+		t.Errorf("page: want 1, got %d", body.Page)
+	}
+	if u := body.Users[0]; u["last_login"] != "2026-06-01T09:00:00Z" {
+		t.Errorf("last_login: want %q, got %v", "2026-06-01T09:00:00Z", u["last_login"])
+	}
+}
+
+func TestPublisherUsers_EntityParam(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("entity"); got != "99" {
+				t.Errorf("entity: want %q, got %q", "99", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUsersListBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/99/users", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestPublisherUsers_FiltersPassthrough(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("search"); got != "Ivan" {
+				t.Errorf("search: want %q, got %q", "Ivan", got)
+			}
+			if got := r.URL.Query().Get("user_access"); got != "Console" {
+				t.Errorf("user_access: want %q, got %q", "Console", got)
+			}
+			if got := r.URL.Query().Get("active"); got != "true" {
+				t.Errorf("active: want %q, got %q", "true", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUsersListBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/users?search=Ivan&user_access=Console&active=true", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+}
+
 // --- Placement report ---
 
 func TestPlacementReport_Success(t *testing.T) {

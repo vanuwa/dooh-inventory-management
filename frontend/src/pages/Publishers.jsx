@@ -4,6 +4,8 @@ import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { tableStyles } from '../styles/tables.js'
+import { useDebounce } from '../hooks/useDebounce.js'
+import PaginationControls from '../components/PaginationControls.jsx'
 
 const badge = {
   display: 'inline-block',
@@ -27,7 +29,7 @@ export default function Publishers() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [committedSearch, setCommittedSearch] = useState('')
+  const committedSearch = useDebounce(search, 300)
   const [activeFilter, setActiveFilter] = useState('true')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -40,14 +42,7 @@ export default function Publishers() {
       .catch(() => {})
   }, [])
 
-  // Debounce search: wait 300ms after user stops typing before fetching
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setCommittedSearch(search)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
+  useEffect(() => { setPage(1) }, [committedSearch])
 
   useEffect(() => {
     setLoading(true)
@@ -142,15 +137,7 @@ export default function Publishers() {
               </table>
             </div>
 
-            <div style={s.pagination}>
-              <button style={s.pageBtn} onClick={() => setPage(p => p - 1)} disabled={page === 1}>
-                Prev
-              </button>
-              <span style={s.pageInfo}>Page {page}{totalPages > 0 ? ` of ${totalPages}` : ''}</span>
-              <button style={s.pageBtn} onClick={() => setPage(p => p + 1)} disabled={page >= totalPages}>
-                Next
-              </button>
-            </div>
+            <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
           </>
         )}
       </main>

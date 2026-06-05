@@ -5,19 +5,23 @@ import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import BulkUploadJobsTab from '../components/BulkUploadJobsTab.jsx'
+import PublisherUsersTab from '../components/PublisherUsersTab.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
+
+const TABS = [
+  { key: 'placements',       label: 'Placements' },
+  { key: 'bulk-upload-jobs', label: 'Bulk Upload Jobs' },
+  { key: 'users',            label: 'Users' },
+  { key: 'reporting',        label: 'Reporting' },
+]
 
 export default function PublisherDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
-  const activeTab = location.pathname.endsWith('/bulk-upload-jobs')
-    ? 'bulk-upload-jobs'
-    : location.pathname.endsWith('/reporting')
-      ? 'reporting'
-      : 'placements'
+  const activeTab = TABS.find(t => location.pathname.endsWith('/' + t.key))?.key ?? 'placements'
 
   const { recordVisit } = useRecentActivity()
 
@@ -25,6 +29,7 @@ export default function PublisherDetail() {
   const [publisher, setPublisher] = useState(null)
   const [placements, setPlacements] = useState([])
   const [loading, setLoading] = useState(true)
+  const [placementsLoading, setPlacementsLoading] = useState(false)
   const [error, setError] = useState('')
   const [placementSearch, setPlacementSearch] = useState('')
   const [placementActiveFilter, setPlacementActiveFilter] = useState('')
@@ -44,14 +49,10 @@ export default function PublisherDetail() {
     setPublisher(null)
     setPlacements([])
     const controller = new AbortController()
-    const signal = controller.signal
-    Promise.all([
-      apiFetch(`/publishers/${id}`, { signal }).then(res => res.json()),
-      apiFetch(`/publishers/${id}/placements`, { signal }).then(res => res.json()),
-    ])
-      .then(([pubData, plData]) => {
+    apiFetch(`/publishers/${id}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(pubData => {
         setPublisher(pubData)
-        setPlacements(plData.placements ?? [])
         setLoading(false)
       })
       .catch(err => {
@@ -61,6 +62,23 @@ export default function PublisherDetail() {
       })
     return () => controller.abort()
   }, [id])
+
+  useEffect(() => {
+    if (activeTab !== 'placements') return
+    setPlacementsLoading(true)
+    const controller = new AbortController()
+    apiFetch(`/publishers/${id}/placements`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(plData => {
+        setPlacements(plData.placements ?? [])
+        setPlacementsLoading(false)
+      })
+      .catch(err => {
+        if (err.name === 'AbortError') return
+        setPlacementsLoading(false)
+      })
+    return () => controller.abort()
+  }, [id, activeTab])
 
   useEffect(() => {
     if (!publisher) return
@@ -88,9 +106,7 @@ export default function PublisherDetail() {
   }
 
   function handleTabClick(tab) {
-    if (tab === 'placements') navigate(`/publishers/${id}/placements`)
-    else if (tab === 'bulk-upload-jobs') navigate(`/publishers/${id}/bulk-upload-jobs`)
-    else navigate(`/publishers/${id}/reporting`)
+    navigate(`/publishers/${id}/${tab}`)
   }
 
   return (
@@ -139,19 +155,20 @@ export default function PublisherDetail() {
         {!loading && (
           <>
             <div style={tabStyles.tabBar}>
-              <button style={activeTab === 'placements' ? tabStyles.tabActive : tabStyles.tab} onClick={() => handleTabClick('placements')}>
-                Placements
-              </button>
-              <button style={activeTab === 'bulk-upload-jobs' ? tabStyles.tabActive : tabStyles.tab} onClick={() => handleTabClick('bulk-upload-jobs')}>
-                Bulk Upload Jobs
-              </button>
-              <button style={activeTab === 'reporting' ? tabStyles.tabActive : tabStyles.tab} onClick={() => handleTabClick('reporting')}>
-                Reporting
-              </button>
+              {TABS.map(t => (
+                <button
+                  key={t.key}
+                  style={activeTab === t.key ? tabStyles.tabActive : tabStyles.tab}
+                  onClick={() => handleTabClick(t.key)}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
 
             {activeTab === 'placements' && (
               <>
+                {placementsLoading && <p style={s.muted}>Loading…</p>}
                 <div style={s.controls}>
                   <input
                     style={s.searchInput}
@@ -171,9 +188,9 @@ export default function PublisherDetail() {
                   </select>
                 </div>
 
-                {visiblePlacements.length === 0
+                {!placementsLoading && visiblePlacements.length === 0
                   ? <p style={s.muted}>No placements found.</p>
-                  : (
+                  : !placementsLoading && (
                     <div style={s.tableWrapper}>
                       <table style={s.table}>
                         <thead>
@@ -223,6 +240,8 @@ export default function PublisherDetail() {
             )}
 
             {activeTab === 'bulk-upload-jobs' && <BulkUploadJobsTab publisherId={id} />}
+
+            {activeTab === 'users' && <PublisherUsersTab publisherId={id} />}
 
             {activeTab === 'reporting' && (
               <ReportingTab

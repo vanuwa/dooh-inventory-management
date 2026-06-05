@@ -4,8 +4,10 @@ import { apiFetch } from '../api.js'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
+import PaginationControls from '../components/PaginationControls.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
+import { useDebounce } from '../hooks/useDebounce.js'
 
 const SCREEN_FIELDS = [
   ['ID', 'id', false],
@@ -72,7 +74,7 @@ export default function PlacementDetail() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [committedSearch, setCommittedSearch] = useState('')
+  const committedSearch = useDebounce(search, 300)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const limit = 20
@@ -129,13 +131,7 @@ export default function PlacementDetail() {
       .catch(() => {})
   }, [publisherId, placementId])
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setCommittedSearch(search)
-      setPage(1)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
+  useEffect(() => { setPage(1) }, [committedSearch])
 
   useEffect(() => {
     if (activeTab !== 'screens') return
@@ -365,15 +361,7 @@ export default function PlacementDetail() {
                   </table>
                 </div>
 
-                <div style={s.pagination}>
-                  <button style={s.pageBtn} onClick={() => setPage(p => p - 1)} disabled={page === 1}>
-                    Prev
-                  </button>
-                  <span style={s.pageInfo}>Page {page}{totalPages > 0 ? ` of ${totalPages}` : ''}</span>
-                  <button style={s.pageBtn} onClick={() => setPage(p => p + 1)} disabled={page >= totalPages}>
-                    Next
-                  </button>
-                </div>
+                <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
               </>
             )}
           </>

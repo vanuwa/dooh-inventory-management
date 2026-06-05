@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api.js'
 import JobStatusBadge from './JobStatusBadge.jsx'
+import PaginationControls from './PaginationControls.jsx'
 import { tableStyles } from '../styles/tables.js'
 
 function JobDetailsModal({ job, onClose }) {
@@ -259,17 +260,7 @@ export default function BulkUploadJobsTab({ publisherId }) {
             </table>
           </div>
 
-          {jobsTotalPages > 1 && (
-            <div style={s.pagination}>
-              <button style={s.pageBtn} onClick={() => setJobsPage(p => p - 1)} disabled={jobsPage === 1}>
-                Prev
-              </button>
-              <span style={s.pageInfo}>Page {jobsPage} of {jobsTotalPages}</span>
-              <button style={s.pageBtn} onClick={() => setJobsPage(p => p + 1)} disabled={jobsPage >= jobsTotalPages}>
-                Next
-              </button>
-            </div>
-          )}
+          <PaginationControls page={jobsPage} totalPages={jobsTotalPages} onPageChange={setJobsPage} />
         </>
       )}
       {selectedJob && <JobDetailsModal job={selectedJob} onClose={handleCloseModal} />}

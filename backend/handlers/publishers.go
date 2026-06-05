@@ -24,12 +24,12 @@ type PublisherItem struct {
 
 type publishersListWrapper struct {
 	Publishers              []PublisherItem `json:"publishers"`
-	TotalNumberOfElemements int             `json:"totalNumberOfElemements"` // upstream API has this typo
+	TotalNumberOfElemements int64           `json:"totalNumberOfElemements"` // upstream API has this typo
 }
 
 type publishersListResponse struct {
 	Publishers []PublisherItem `json:"publishers"`
-	Total      int             `json:"total"`
+	Total      int64           `json:"total"`
 	Page       int             `json:"page"`
 	Limit      int             `json:"limit"`
 }
@@ -91,6 +91,40 @@ type placementDoohsResponse struct {
 	Total        int64               `json:"total"`
 	Page         int                 `json:"page"`
 	Limit        int                 `json:"limit"`
+}
+
+type upstreamUserItem struct {
+	ID            int64  `json:"id"`
+	FirstName     string `json:"first_name"`
+	LastName      string `json:"last_name"`
+	Email         string `json:"email"`
+	UserType      string `json:"user_type"`
+	UserAccess    string `json:"user_access"`
+	Active        bool   `json:"active"`
+	LastLoginTime string `json:"lastLoginTime"`
+}
+
+type usersListWrapper struct {
+	Users                   []upstreamUserItem `json:"users"`
+	TotalNumberOfElemements int64              `json:"totalNumberOfElemements"`
+}
+
+type UserItem struct {
+	ID         int64  `json:"id"`
+	FirstName  string `json:"first_name"`
+	LastName   string `json:"last_name"`
+	Email      string `json:"email"`
+	UserType   string `json:"user_type"`
+	UserAccess string `json:"user_access"`
+	Active     bool   `json:"active"`
+	LastLogin  string `json:"last_login"`
+}
+
+type usersListResponse struct {
+	Users []UserItem `json:"users"`
+	Total int64      `json:"total"`
+	Page  int        `json:"page"`
+	Limit int        `json:"limit"`
 }
 
 type PublishersHandler struct {
@@ -172,7 +206,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total := int(resolveTotal(int64(wrapper.TotalNumberOfElemements), upHeaders.Get("X-360-Content-Range")))
+	total := resolveTotal(wrapper.TotalNumberOfElemements, upHeaders.Get("X-360-Content-Range"))
 
 	writeJSON(w, publishersListResponse{
 		Publishers: wrapper.Publishers,
@@ -274,6 +308,69 @@ func (h *PublishersHandler) GetPlacementDoohSettings(w http.ResponseWriter, r *h
 		Total:        total,
 		Page:         page,
 		Limit:        limit,
+	})
+}
+
+func (h *PublishersHandler) PublisherUsers(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	accessToken := r.Header.Get("X-Access-Token")
+
+	page, limit, offset := parsePage(r.URL.Query())
+
+	params := url.Values{}
+	params.Set("entity", id)
+	params.Set("sort", "-id")
+	params.Set("offset", strconv.Itoa(offset))
+	params.Set("limit", strconv.Itoa(limit))
+
+	if search := r.URL.Query().Get("search"); search != "" {
+		params.Set("search", search)
+	}
+	if userAccess := r.URL.Query().Get("user_access"); userAccess != "" {
+		params.Set("user_access", userAccess)
+	}
+	if active := r.URL.Query().Get("active"); active != "" {
+		params.Set("active", active)
+	}
+
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v2/users?"+params.Encode(), accessToken, nil, "")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+		return
+	}
+
+	var wrapper usersListWrapper
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		http.Error(w, "failed to parse users response", http.StatusInternalServerError)
+		return
+	}
+
+	total := resolveTotal(wrapper.TotalNumberOfElemements, upHeaders.Get("X-360-Content-Range"))
+
+	users := make([]UserItem, len(wrapper.Users))
+	for i, u := range wrapper.Users {
+		users[i] = UserItem{
+			ID:         u.ID,
+			FirstName:  u.FirstName,
+			LastName:   u.LastName,
+			Email:      u.Email,
+			UserType:   u.UserType,
+			UserAccess: u.UserAccess,
+			Active:     u.Active,
+			LastLogin:  u.LastLoginTime,
+		}
+	}
+
+	writeJSON(w, usersListResponse{
+		Users: users,
+		Total: total,
+		Page:  page,
+		Limit: limit,
 	})
 }
 

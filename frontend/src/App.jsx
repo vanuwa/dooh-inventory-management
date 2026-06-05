@@ -63,6 +63,14 @@ export default function App() {
             }
           />
           <Route
+            path="/publishers/:id/users"
+            element={
+              <ProtectedRoute>
+                <PublisherDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/publishers/:id/reporting"
             element={
               <ProtectedRoute>

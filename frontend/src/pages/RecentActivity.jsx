@@ -3,13 +3,7 @@ import { Link } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
-
-const PAGE_TYPES = {
-  placements:          { label: 'Placements',  bg: '#dbeafe', color: '#1e40af' },
-  screens:             { label: 'Screens',     bg: '#d1fae5', color: '#065f46' },
-  reporting:           { label: 'Reporting',   bg: '#ede9fe', color: '#5b21b6' },
-  'bulk-upload-jobs':  { label: 'Upload Jobs', bg: '#fef3c7', color: '#92400e' },
-}
+import { PAGE_TYPES } from '../constants/pageTypes.js'
 
 function timeAgo(ts) {
   const diff = Date.now() - ts
