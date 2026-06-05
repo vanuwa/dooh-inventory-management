@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { apiFetch } from '../api.js'
+import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import BulkUploadJobsTab from '../components/BulkUploadJobsTab.jsx'
@@ -17,6 +18,8 @@ export default function PublisherDetail() {
     : location.pathname.endsWith('/reporting')
       ? 'reporting'
       : 'placements'
+
+  const { recordVisit } = useRecentActivity()
 
   const [user, setUser] = useState(null)
   const [publisher, setPublisher] = useState(null)
@@ -58,6 +61,14 @@ export default function PublisherDetail() {
       })
     return () => controller.abort()
   }, [id])
+
+  useEffect(() => {
+    if (!publisher) return
+    const url = activeTab === 'placements'
+      ? `/publishers/${id}`
+      : `/publishers/${id}/${activeTab}`
+    recordVisit({ url, pageType: activeTab, publisher: { name: publisher.name, id } })
+  }, [publisher, activeTab])
 
   const lowerSearch = placementSearch.toLowerCase()
   const filteredPlacements = placements.filter(pl => {

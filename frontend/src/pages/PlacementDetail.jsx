@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useLocation, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../api.js'
+import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import { tabStyles } from '../styles/tabs.js'
@@ -56,11 +57,15 @@ export default function PlacementDetail() {
   const { publisherId, placementId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const placementName = location.state?.placement?.name ?? `Placement ${placementId}`
+  const locationPlacementName = location.state?.placement?.name ?? null
   const activeTab = location.pathname.endsWith('/reporting') ? 'reporting' : 'screens'
+
+  const { recordVisit } = useRecentActivity()
 
   const [user, setUser] = useState(null)
   const [publisherName, setPublisherName] = useState(location.state?.publisherName ?? '')
+  const [fetchedPlacementName, setFetchedPlacementName] = useState(null)
+  const placementName = locationPlacementName ?? fetchedPlacementName ?? `Placement ${placementId}`
 
   // screens tab
   const [doohSettings, setDoohSettings] = useState([])
@@ -91,12 +96,38 @@ export default function PlacementDetail() {
   }, [])
 
   useEffect(() => {
+    if (!publisherName) return
+    const resolvedPlacementName = locationPlacementName ?? fetchedPlacementName
+    if (!resolvedPlacementName) return
+    const url = activeTab === 'reporting'
+      ? `/publishers/${publisherId}/placements/${placementId}/reporting`
+      : `/publishers/${publisherId}/placements/${placementId}`
+    recordVisit({
+      url,
+      pageType: activeTab,
+      publisher: { name: publisherName, id: publisherId },
+      placement: { name: resolvedPlacementName, id: placementId },
+    })
+  }, [publisherName, activeTab, fetchedPlacementName])
+
+  useEffect(() => {
     if (publisherName) return
     apiFetch(`/publishers/${publisherId}`)
       .then(res => res.json())
       .then(data => { if (data.name) setPublisherName(data.name) })
       .catch(() => {})
   }, [publisherId])
+
+  useEffect(() => {
+    if (locationPlacementName) return
+    apiFetch(`/publishers/${publisherId}/placements`)
+      .then(r => r.json())
+      .then(data => {
+        const pl = (data.placements ?? []).find(p => String(p.id) === String(placementId))
+        if (pl?.name) setFetchedPlacementName(pl.name)
+      })
+      .catch(() => {})
+  }, [publisherId, placementId])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -229,8 +260,8 @@ export default function PlacementDetail() {
         </div>
 
         <div style={tabStyles.tabBar}>
-          <button style={activeTab === 'screens' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/screens`)}>Screens</button>
-          <button style={activeTab === 'reporting' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/reporting`)}>Reporting</button>
+          <button style={activeTab === 'screens' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/screens`, { state: { publisherName, placement: { name: placementName } } })}>Screens</button>
+          <button style={activeTab === 'reporting' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/reporting`, { state: { publisherName, placement: { name: placementName } } })}>Reporting</button>
         </div>
 
         {activeTab === 'screens' && (

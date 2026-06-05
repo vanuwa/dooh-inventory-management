@@ -6,6 +6,7 @@ import UserPage from './pages/UserPage.jsx'
 import Publishers from './pages/Publishers.jsx'
 import PublisherDetail from './pages/PublisherDetail.jsx'
 import PlacementDetail from './pages/PlacementDetail.jsx'
+import RecentActivity from './pages/RecentActivity.jsx'
 
 export default function App() {
   return (
@@ -18,6 +19,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <UserPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recent"
+            element={
+              <ProtectedRoute>
+                <RecentActivity />
               </ProtectedRoute>
             }
           />
@@ -85,7 +94,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/publishers" replace />} />
+          <Route path="*" element={<Navigate to="/recent" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
