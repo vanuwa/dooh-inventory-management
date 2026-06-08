@@ -9,6 +9,8 @@ import PublisherUsersTab from '../components/PublisherUsersTab.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
+import { useDebounce } from '../hooks/useDebounce.js'
+import PaginationControls from '../components/PaginationControls.jsx'
 
 const TABS = [
   { key: 'placements',       label: 'Placements' },
@@ -28,13 +30,16 @@ export default function PublisherDetail() {
   const [user, setUser] = useState(null)
   const [publisher, setPublisher] = useState(null)
   const [placements, setPlacements] = useState([])
+  const [placementTotal, setPlacementTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [placementsLoading, setPlacementsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [placementsError, setPlacementsError] = useState('')
   const [placementSearch, setPlacementSearch] = useState('')
+  const committedSearch = useDebounce(placementSearch, 300)
   const [placementActiveFilter, setPlacementActiveFilter] = useState('')
   const [placementPage, setPlacementPage] = useState(1)
-  const placementsPerPage = 20
+  const placementsLimit = 20
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -63,22 +68,33 @@ export default function PublisherDetail() {
     return () => controller.abort()
   }, [id])
 
+  useEffect(() => { setPlacementPage(1) }, [committedSearch])
+
   useEffect(() => {
     if (activeTab !== 'placements') return
     setPlacementsLoading(true)
+    setPlacementsError('')
+    let path = `/publishers/${id}/placements?page=${placementPage}&limit=${placementsLimit}`
+    if (committedSearch) path += `&search=${encodeURIComponent(committedSearch)}`
+    if (placementActiveFilter !== '') path += `&active=${placementActiveFilter}`
     const controller = new AbortController()
-    apiFetch(`/publishers/${id}/placements`, { signal: controller.signal })
+    apiFetch(path, { signal: controller.signal })
       .then(res => res.json())
       .then(plData => {
         setPlacements(plData.placements ?? [])
+        setPlacementTotal(plData.total ?? 0)
         setPlacementsLoading(false)
       })
       .catch(err => {
         if (err.name === 'AbortError') return
+        if (err.message !== 'Unauthorized') {
+          setPlacementsError('Failed to load placements.')
+          setPlacements([])
+        }
         setPlacementsLoading(false)
       })
     return () => controller.abort()
-  }, [id, activeTab])
+  }, [id, activeTab, placementPage, committedSearch, placementActiveFilter])
 
   useEffect(() => {
     if (!publisher) return
@@ -88,22 +104,7 @@ export default function PublisherDetail() {
     recordVisit({ url, pageType: activeTab, publisher: { name: publisher.name, id } })
   }, [publisher, activeTab])
 
-  const lowerSearch = placementSearch.toLowerCase()
-  const filteredPlacements = placements.filter(pl => {
-    if (placementActiveFilter === 'true' && !pl.placement_status) return false
-    if (placementActiveFilter === 'false' && pl.placement_status) return false
-    if (lowerSearch && !pl.name.toLowerCase().includes(lowerSearch)) return false
-    return true
-  })
-  const placementTotalPages = Math.ceil(filteredPlacements.length / placementsPerPage)
-  const visiblePlacements = filteredPlacements.slice(
-    (placementPage - 1) * placementsPerPage,
-    placementPage * placementsPerPage,
-  )
-
-  function handlePlacementFilterChange(setter) {
-    return e => { setter(e.target.value); setPlacementPage(1) }
-  }
+  const placementTotalPages = Math.ceil(placementTotal / placementsLimit)
 
   function handleTabClick(tab) {
     navigate(`/publishers/${id}/${tab}`)
@@ -169,18 +170,19 @@ export default function PublisherDetail() {
             {activeTab === 'placements' && (
               <>
                 {placementsLoading && <p style={s.muted}>Loading…</p>}
+                {placementsError && <p style={s.error}>{placementsError}</p>}
                 <div style={s.controls}>
                   <input
                     style={s.searchInput}
                     type="text"
                     placeholder="Search placements…"
                     value={placementSearch}
-                    onChange={e => { setPlacementSearch(e.target.value); setPlacementPage(1) }}
+                    onChange={e => setPlacementSearch(e.target.value)}
                   />
                   <select
                     style={s.select}
                     value={placementActiveFilter}
-                    onChange={handlePlacementFilterChange(setPlacementActiveFilter)}
+                    onChange={e => { setPlacementActiveFilter(e.target.value); setPlacementPage(1) }}
                   >
                     <option value="">All</option>
                     <option value="true">Active only</option>
@@ -188,54 +190,45 @@ export default function PublisherDetail() {
                   </select>
                 </div>
 
-                {!placementsLoading && visiblePlacements.length === 0
+                {!placementsLoading && placements.length === 0
                   ? <p style={s.muted}>No placements found.</p>
                   : !placementsLoading && (
-                    <div style={s.tableWrapper}>
-                      <table style={s.table}>
-                        <thead>
-                          <tr>
-                            <th style={s.th}>ID</th>
-                            <th style={s.th}>Name</th>
-                            <th style={s.th}>Type</th>
-                            <th style={s.th}>Site</th>
-                            <th style={s.th}>Platform</th>
-                            <th style={s.th}>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {visiblePlacements.map((pl, i) => (
-                            <tr
-                              key={pl.id}
-                              className="clickable-row"
-                              style={i % 2 !== 0 ? s.rowAlt : undefined}
-                              onClick={() => navigate('/publishers/' + id + '/placements/' + pl.id, { state: { placement: pl, publisherName: publisher?.name } })}
-                            >
-                              <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
-                              <td style={s.td}>{pl.name}</td>
-                              <td style={s.td}>{pl.placement_type || '—'}</td>
-                              <td style={s.td}>{pl.inventory_name ? `${pl.inventory_name} (${pl.inventory_id})` : '—'}</td>
-                              <td style={s.td}>{pl.inventory_platform_type_name || '—'}</td>
-                              <td style={s.td}><StatusBadge active={pl.placement_status} /></td>
+                    <>
+                      <div style={s.tableWrapper}>
+                        <table style={s.table}>
+                          <thead>
+                            <tr>
+                              <th style={s.th}>ID</th>
+                              <th style={s.th}>Name</th>
+                              <th style={s.th}>Type</th>
+                              <th style={s.th}>Site</th>
+                              <th style={s.th}>Platform</th>
+                              <th style={s.th}>Status</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {placements.map((pl, i) => (
+                              <tr
+                                key={pl.id}
+                                className="clickable-row"
+                                style={i % 2 !== 0 ? s.rowAlt : undefined}
+                                onClick={() => navigate('/publishers/' + id + '/placements/' + pl.id, { state: { placement: pl, publisherName: publisher?.name } })}
+                              >
+                                <td style={s.td}><span style={s.idTag}>{pl.id}</span></td>
+                                <td style={s.td}>{pl.name}</td>
+                                <td style={s.td}>{pl.placement_type || '—'}</td>
+                                <td style={s.td}>{pl.inventory_name ? `${pl.inventory_name} (${pl.inventory_id})` : '—'}</td>
+                                <td style={s.td}>{pl.inventory_platform_type_name || '—'}</td>
+                                <td style={s.td}><StatusBadge active={pl.placement_status} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <PaginationControls page={placementPage} totalPages={placementTotalPages} onPageChange={setPlacementPage} />
+                    </>
                   )
                 }
-
-                {placementTotalPages > 1 && (
-                  <div style={s.pagination}>
-                    <button style={s.pageBtn} onClick={() => setPlacementPage(p => p - 1)} disabled={placementPage === 1}>
-                      Prev
-                    </button>
-                    <span style={s.pageInfo}>Page {placementPage} of {placementTotalPages}</span>
-                    <button style={s.pageBtn} onClick={() => setPlacementPage(p => p + 1)} disabled={placementPage >= placementTotalPages}>
-                      Next
-                    </button>
-                  </div>
-                )}
               </>
             )}
 

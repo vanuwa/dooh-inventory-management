@@ -122,13 +122,15 @@ export default function PlacementDetail() {
 
   useEffect(() => {
     if (locationPlacementName) return
-    apiFetch(`/publishers/${publisherId}/placements`)
+    const controller = new AbortController()
+    apiFetch(`/publishers/${publisherId}/placements?limit=100`, { signal: controller.signal })
       .then(r => r.json())
       .then(data => {
         const pl = (data.placements ?? []).find(p => String(p.id) === String(placementId))
         if (pl?.name) setFetchedPlacementName(pl.name)
       })
       .catch(() => {})
+    return () => controller.abort()
   }, [publisherId, placementId])
 
   useEffect(() => { setPage(1) }, [committedSearch])

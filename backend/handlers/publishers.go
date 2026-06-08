@@ -39,17 +39,25 @@ type PublisherPlacement struct {
 	Name                      string `json:"name"`
 	PlacementStatus           bool   `json:"placement_status"`
 	PlacementType             string `json:"placement_type"`
+	Position                  string `json:"position"`
+	PrimarySize               string `json:"primary_size"`
 	InventoryID               int64  `json:"inventory_id"`
 	InventoryName             string `json:"inventory_name"`
 	InventoryPlatformTypeName string `json:"inventory_platform_type_name"`
+	ZoneID                    int64  `json:"zone_id"`
+	ZoneName                  string `json:"zone_name"`
 }
 
 type publisherPlacementsWrapper struct {
-	Placements []PublisherPlacement `json:"publisher_placements_v2"`
+	Placements              []PublisherPlacement `json:"publisher_placements_v2"`
+	TotalNumberOfElemements int64                `json:"totalNumberOfElemements"`
 }
 
 type publisherPlacementsResponse struct {
 	Placements []PublisherPlacement `json:"placements"`
+	Total      int64                `json:"total"`
+	Page       int                  `json:"page"`
+	Limit      int                  `json:"limit"`
 }
 
 type PlacementDoohItem struct {
@@ -243,9 +251,21 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 	id := r.PathValue("id")
 	accessToken := r.Header.Get("X-Access-Token")
 
-	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements", id)
+	page, limit, offset := parsePage(r.URL.Query())
 
-	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
+	params := url.Values{}
+	params.Set("limit", strconv.Itoa(limit))
+	params.Set("offset", strconv.Itoa(offset))
+	if search := r.URL.Query().Get("search"); search != "" {
+		params.Set("search", search)
+	}
+	if active := r.URL.Query().Get("active"); active != "" {
+		params.Set("placement_status", active)
+	}
+
+	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements?%s", id, params.Encode())
+
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -262,8 +282,13 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	total := resolveTotal(wrapper.TotalNumberOfElemements, upHeaders.Get("X-360-Content-Range"))
+
 	writeJSON(w, publisherPlacementsResponse{
 		Placements: wrapper.Placements,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
 	})
 }
 
