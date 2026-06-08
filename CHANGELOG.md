@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-06-08 (2)
+
+### Bug Fixes
+- Fixed publisher placements grid: switched to server-side pagination and search (was silently truncated to 100 results, breaking search for large publishers)
+- Fixed active/inactive filter for placements: forwarded as `placement_status` to match the upstream API field name
+- Fixed placement name fallback on direct navigation: increased fetch limit so names resolve correctly for publishers with more than 20 placements
+- Fixed double upstream fetch when changing the active filter on the placements tab
+- Added error feedback and stale-data clearing on placements fetch failure
+
+### Improvements
+- Added missing fields to placements data: `position`, `primary_size`, `zone_id`, `zone_name`
+
 ## 2026-06-08
 
 ### Features
