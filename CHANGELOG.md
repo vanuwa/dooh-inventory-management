@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-06-08
+
+### Features
+- Added Changelog page listing all releases grouped by date with category chips
+- Added update notification banner that detects when a newer version is available on the main branch
+
 ## 2026-06-05
 
 ### Features
