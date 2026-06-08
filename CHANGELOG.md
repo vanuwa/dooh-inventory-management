@@ -1,6 +1,10 @@
 # Changelog
 
-## 2026-06-08 (2)
+## 2026-06-08
+
+### Features
+- Added Changelog page listing all releases grouped by date with category chips
+- Added update notification banner that detects when a newer version is available on the main branch
 
 ### Bug Fixes
 - Fixed publisher placements grid: switched to server-side pagination and search (was silently truncated to 100 results, breaking search for large publishers)
@@ -11,12 +15,6 @@
 
 ### Improvements
 - Added missing fields to placements data: `position`, `primary_size`, `zone_id`, `zone_name`
-
-## 2026-06-08
-
-### Features
-- Added Changelog page listing all releases grouped by date with category chips
-- Added update notification banner that detects when a newer version is available on the main branch
 
 ## 2026-06-05
 
