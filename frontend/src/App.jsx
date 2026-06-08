@@ -7,6 +7,7 @@ import Publishers from './pages/Publishers.jsx'
 import PublisherDetail from './pages/PublisherDetail.jsx'
 import PlacementDetail from './pages/PlacementDetail.jsx'
 import RecentActivity from './pages/RecentActivity.jsx'
+import Changelog from './pages/Changelog.jsx'
 
 export default function App() {
   return (
@@ -99,6 +100,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <PlacementDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/changelog"
+            element={
+              <ProtectedRoute>
+                <Changelog />
               </ProtectedRoute>
             }
           />

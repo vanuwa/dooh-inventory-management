@@ -13,7 +13,11 @@ services:
       - PORT=8080
 
   ui:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
     image: dooh-inventory-ui
     container_name: dooh-inventory-ui
     ports:

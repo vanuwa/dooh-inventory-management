@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useVersionCheck } from '../hooks/useVersionCheck.js'
 
 function UserAvatar() {
   return (
@@ -15,6 +17,8 @@ function UserAvatar() {
 export default function Layout({ user, children }) {
   const { logout } = useAuth()
   const navigate = useNavigate()
+  const isOutdated = useVersionCheck()
+  const [dismissed, setDismissed] = useState(false)
 
   const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
 
@@ -32,6 +36,7 @@ export default function Layout({ user, children }) {
           <nav style={s.nav}>
             <Link to="/recent" style={s.navLink}>Recent</Link>
             <Link to="/publishers" style={s.navLink}>Publishers</Link>
+            <Link to="/changelog" style={s.navLink}>Changelog</Link>
           </nav>
         </div>
         <div style={s.headerRight}>
@@ -45,6 +50,16 @@ export default function Layout({ user, children }) {
           <button style={s.logoutBtn} onClick={handleLogout}>Logout</button>
         </div>
       </header>
+      {isOutdated && !dismissed && (
+        <div style={s.updateBanner}>
+          <span>
+            A new version is available — run{' '}
+            <code style={s.code}>git pull &amp;&amp; make down &amp;&amp; make up</code>{' '}
+            to update.
+          </span>
+          <button style={s.dismissBtn} onClick={() => setDismissed(true)}>✕</button>
+        </div>
+      )}
       {children}
     </div>
   )
@@ -79,6 +94,32 @@ const s = {
   },
   userName: { fontSize: '0.875rem', color: '#e2e8f0', fontWeight: 500, textDecoration: 'none' },
   vDivider: { display: 'inline-block', width: 1, height: 20, background: 'rgba(255,255,255,0.2)' },
+  updateBanner: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0.6rem 1.5rem',
+    background: '#fef9c3',
+    borderBottom: '1px solid #fde047',
+    fontSize: '0.875rem',
+    color: '#713f12',
+  },
+  code: {
+    fontFamily: 'monospace',
+    background: '#fef08a',
+    padding: '0.1rem 0.35rem',
+    borderRadius: 3,
+  },
+  dismissBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#713f12',
+    fontSize: '1rem',
+    lineHeight: 1,
+    padding: '0 0.25rem',
+    flexShrink: 0,
+  },
   logoutBtn: {
     padding: '0.375rem 0.875rem',
     background: 'transparent',
