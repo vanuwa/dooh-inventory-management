@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useLocation, useNavigate, Link } from 'react-router-dom'
+import { useParams, useLocation, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
@@ -89,6 +89,10 @@ export default function PlacementDetail() {
   const [editValues, setEditValues] = useState({})
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [copiedVast, setCopiedVast] = useState(false)
+  const autoOpenAttemptedRef = useRef(false)
+  const copiedVastTimerRef = useRef(null)
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -134,6 +138,31 @@ export default function PlacementDetail() {
   }, [publisherId, placementId])
 
   useEffect(() => { setPage(1) }, [committedSearch])
+
+  const initialScreenId = searchParams.get('screen')
+
+  useEffect(() => {
+    if (autoOpenAttemptedRef.current || loading || !initialScreenId) return
+    const found = doohSettings.find(sc => String(sc.id) === initialScreenId)
+    if (found) {
+      autoOpenAttemptedRef.current = true
+      setSelectedScreen(found)
+      return
+    }
+    autoOpenAttemptedRef.current = true
+    apiFetch(`/publishers/${publisherId}/placements/${placementId}/dooh-settings/${initialScreenId}`)
+      .then(res => {
+        if (!res.ok) { autoOpenAttemptedRef.current = false; return null }
+        return res.json()
+      })
+      .then(data => { if (data?.dooh_setting) setSelectedScreen(data.dooh_setting) })
+      .catch(() => { autoOpenAttemptedRef.current = false })
+  }, [loading, doohSettings, initialScreenId])
+
+  useEffect(() => {
+    setCopiedVast(false)
+    return () => { if (copiedVastTimerRef.current) clearTimeout(copiedVastTimerRef.current) }
+  }, [selectedScreen])
 
   useEffect(() => {
     if (activeTab !== 'screens') return
@@ -207,6 +236,20 @@ export default function PlacementDetail() {
       screensCsvInFlightRef.current = false
       setScreensCsvLoading(false)
     }
+  }
+
+  function closeModal() {
+    setSelectedScreen(null)
+    setSearchParams({}, { replace: true })
+  }
+
+  function handleCopyVastTag() {
+    const { publisher_id, placement_id, player_id } = selectedScreen
+    const vastUrl = `https://ad.360yield.com/${publisher_id}/advast?p=${placement_id}&player_id=${encodeURIComponent(player_id)}&dooh_multiplier=1`
+    navigator.clipboard.writeText(vastUrl).catch(() => {})
+    if (copiedVastTimerRef.current) clearTimeout(copiedVastTimerRef.current)
+    setCopiedVast(true)
+    copiedVastTimerRef.current = setTimeout(() => setCopiedVast(false), 2000)
   }
 
   function handleEdit() {
@@ -335,7 +378,7 @@ export default function PlacementDetail() {
                         return (
                           <tr
                             key={sc.id}
-                            onClick={() => { setSelectedScreen(sc); setEditMode(false) }}
+                            onClick={() => { setSelectedScreen(sc); setEditMode(false); setSearchParams({ screen: String(sc.id) }, { replace: true }) }}
                             onMouseEnter={() => setHoveredScreenId(sc.id)}
                             onMouseLeave={() => setHoveredScreenId(null)}
                             style={{ cursor: 'pointer', background: hoveredScreenId === sc.id ? '#e8edf2' : (i % 2 !== 0 ? '#fafafa' : undefined) }}
@@ -370,12 +413,17 @@ export default function PlacementDetail() {
         )}
 
         {selectedScreen && (
-          <div style={s.overlay} onClick={() => setSelectedScreen(null)}>
+          <div style={s.overlay} onClick={closeModal}>
             <div style={s.modal} onClick={e => e.stopPropagation()}>
               <div style={s.modalHeader}>
                 <h3 style={s.modalTitle}>Screen #{selectedScreen.id}</h3>
                 {!editMode && (
-                  <button style={s.editBtn} onClick={handleEdit}>Edit</button>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <button style={s.vastTagBtn} onClick={handleCopyVastTag} disabled={!selectedScreen.player_id}>
+                      {copiedVast ? 'Copied!' : 'Copy VAST Tag'}
+                    </button>
+                    <button style={s.editBtn} onClick={handleEdit}>Edit</button>
+                  </div>
                 )}
               </div>
 
@@ -414,7 +462,7 @@ export default function PlacementDetail() {
                     </button>
                   </>
                 ) : (
-                  <button style={s.primaryBtn} onClick={() => setSelectedScreen(null)}>Close</button>
+                  <button style={s.primaryBtn} onClick={closeModal}>Close</button>
                 )}
               </div>
             </div>
@@ -468,6 +516,7 @@ const s = {
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexShrink: 0 },
   modalTitle: { margin: 0, fontSize: '1rem', fontWeight: 700, color: '#111827' },
   editBtn: { padding: '0.375rem 0.875rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 },
+  vastTagBtn: { padding: '0.375rem 0.875rem', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 500 },
   modalBodyScroll: { overflowY: 'auto', flex: 1 },
   modalTable: { width: '100%', borderCollapse: 'collapse' },
   modalRow: { borderBottom: '1px solid #f3f4f6' },

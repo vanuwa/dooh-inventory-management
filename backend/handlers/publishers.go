@@ -399,6 +399,43 @@ func (h *PublishersHandler) PublisherUsers(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+func (h *PublishersHandler) GetPlacementDoohSettingItem(w http.ResponseWriter, r *http.Request) {
+	placementID := r.PathValue("placementId")
+	screenID := r.PathValue("screenId")
+	accessToken := r.Header.Get("X-Access-Token")
+	// url.PathEscape prevents path traversal via percent-encoded segments (e.g. "789%2F..")
+	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings/%s",
+		url.PathEscape(placementID), url.PathEscape(screenID))
+
+	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken, nil, "")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+		return
+	}
+
+	// The upstream may return the item directly or wrapped in {"dooh_setting": {...}}.
+	// Try the wrapped form first (consistent with the list endpoint convention), then fall back.
+	var wrapper struct {
+		DoohSetting PlacementDoohItem `json:"dooh_setting"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err == nil && wrapper.DoohSetting.ID != 0 {
+		writeJSON(w, map[string]any{"dooh_setting": wrapper.DoohSetting})
+		return
+	}
+
+	var item PlacementDoohItem
+	if err := json.Unmarshal(body, &item); err != nil {
+		http.Error(w, "failed to parse dooh-setting response", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"dooh_setting": item})
+}
+
 func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
