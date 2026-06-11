@@ -495,6 +495,58 @@ func writeErrorJSON(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"message": message})
 }
 
+// rolesFromAccesses converts an accesses map into upstream roles using
+// accessRoleMap. A missing area defaults to "Hide". Returns a non-empty
+// error message when a value is invalid or every area is Hide.
+func rolesFromAccesses(accesses map[string]string) ([]upstreamRole, string) {
+	roles := []upstreamRole{}
+	for area, levels := range accessRoleMap {
+		level := accesses[area]
+		if level == "" {
+			level = "Hide"
+		}
+		names, ok := levels[level]
+		if !ok {
+			return nil, fmt.Sprintf("invalid value %q for access %q", level, area)
+		}
+		for _, name := range names {
+			roles = append(roles, upstreamRole{Name: name, RoleType: "PUBLISHER"})
+		}
+	}
+	if len(roles) == 0 {
+		return nil, "at least one access must not be Hide"
+	}
+	return roles, ""
+}
+
+// accessesFromRoles reverse-maps upstream role names to the accesses shape
+// used by the UI. For each area the most specific level whose roles are all
+// present wins; otherwise "Hide".
+func accessesFromRoles(roleNames map[string]bool) map[string]string {
+	accesses := map[string]string{}
+	for area, levels := range accessRoleMap {
+		accesses[area] = "Hide"
+		for _, level := range []string{"Create", "Read Only", "Show"} {
+			names, ok := levels[level]
+			if !ok || len(names) == 0 {
+				continue
+			}
+			all := true
+			for _, name := range names {
+				if !roleNames[name] {
+					all = false
+					break
+				}
+			}
+			if all {
+				accesses[area] = level
+				break
+			}
+		}
+	}
+	return accesses
+}
+
 // CreatePublisherUser handles POST /api/publishers/{id}/users. It accepts a
 // narrow request shape and builds the upstream UserV2Dto itself, so only
 // PUBLISHER users with whitelisted roles can ever be created through this portal.
@@ -524,23 +576,9 @@ func (h *PublishersHandler) CreatePublisherUser(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	roles := []upstreamRole{}
-	for area, levels := range accessRoleMap {
-		level := req.Accesses[area]
-		if level == "" {
-			level = "Hide"
-		}
-		names, ok := levels[level]
-		if !ok {
-			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("invalid value %q for access %q", level, area))
-			return
-		}
-		for _, name := range names {
-			roles = append(roles, upstreamRole{Name: name, RoleType: "PUBLISHER"})
-		}
-	}
-	if len(roles) == 0 {
-		writeErrorJSON(w, http.StatusBadRequest, "at least one access must not be Hide")
+	roles, errMsg := rolesFromAccesses(req.Accesses)
+	if errMsg != "" {
+		writeErrorJSON(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
@@ -572,6 +610,160 @@ func (h *PublishersHandler) CreatePublisherUser(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeProxyResponse(w, status, respBody, upHeaders)
+}
+
+type upstreamUserDetail struct {
+	ID         int64          `json:"id"`
+	FirstName  string         `json:"first_name"`
+	LastName   string         `json:"last_name"`
+	Email      string         `json:"email"`
+	UserType   string         `json:"user_type"`
+	UserAccess string         `json:"user_access"`
+	Active     bool           `json:"active"`
+	Roles      []upstreamRole `json:"roles"`
+	Publishers []IdName       `json:"publishers"`
+}
+
+// GetPublisherUser handles GET /api/publishers/{id}/users/{userId}. It returns
+// the user's details with roles reverse-mapped to the UI accesses shape.
+func (h *PublishersHandler) GetPublisherUser(w http.ResponseWriter, r *http.Request) {
+	userID := r.PathValue("userId")
+	accessToken := r.Header.Get("X-Access-Token")
+
+	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v2/users/"+userID, accessToken, nil, "")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	if status < 200 || status >= 300 {
+		writeProxyResponse(w, status, body, upHeaders)
+		return
+	}
+
+	var u upstreamUserDetail
+	if err := json.Unmarshal(body, &u); err != nil {
+		http.Error(w, "failed to parse user response", http.StatusInternalServerError)
+		return
+	}
+
+	roleNames := map[string]bool{}
+	for _, role := range u.Roles {
+		roleNames[role.Name] = true
+	}
+
+	writeJSON(w, map[string]any{
+		"id":          u.ID,
+		"first_name":  u.FirstName,
+		"last_name":   u.LastName,
+		"email":       u.Email,
+		"user_type":   u.UserType,
+		"user_access": u.UserAccess,
+		"active":      u.Active,
+		"publishers":  u.Publishers,
+		"accesses":    accessesFromRoles(roleNames),
+	})
+}
+
+type updateUserRequest struct {
+	FirstName  string            `json:"first_name"`
+	LastName   string            `json:"last_name"`
+	Email      string            `json:"email"`
+	Active     bool              `json:"active"`
+	Publishers []IdName          `json:"publishers"`
+	Accesses   map[string]string `json:"accesses"`
+}
+
+// UpdatePublisherUser handles PUT /api/publishers/{id}/users/{userId}.
+// The upstream PUT /admin/v2/users requires the full UserV2Dto (collections
+// are replaced wholesale), so the current user is fetched first and only the
+// editable fields are overridden. Non-PUBLISHER users are rejected.
+func (h *PublishersHandler) UpdatePublisherUser(w http.ResponseWriter, r *http.Request) {
+	userID := r.PathValue("userId")
+	accessToken := r.Header.Get("X-Access-Token")
+
+	var req updateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.FirstName) == "" || strings.TrimSpace(req.LastName) == "" || strings.TrimSpace(req.Email) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "first_name, last_name and email are required")
+		return
+	}
+	if len(req.Publishers) == 0 {
+		writeErrorJSON(w, http.StatusBadRequest, "at least one publisher is required")
+		return
+	}
+	roles, errMsg := rolesFromAccesses(req.Accesses)
+	if errMsg != "" {
+		writeErrorJSON(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	fetched, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v2/users/"+userID, accessToken, nil, "")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	if status < 200 || status >= 300 {
+		writeProxyResponse(w, status, fetched, upHeaders)
+		return
+	}
+
+	var current map[string]any
+	if err := json.Unmarshal(fetched, &current); err != nil {
+		http.Error(w, "failed to parse user response", http.StatusInternalServerError)
+		return
+	}
+	if current["user_type"] != "PUBLISHER" {
+		writeErrorJSON(w, http.StatusBadRequest, "only Publisher users can be edited")
+		return
+	}
+
+	// Preserve roles outside our whitelist so saving never silently strips
+	// them. PUBLISHER_DEFAULT is excluded — upstream auto-manages it.
+	managed := map[string]bool{"PUBLISHER_DEFAULT": true}
+	for _, levels := range accessRoleMap {
+		for _, names := range levels {
+			for _, name := range names {
+				managed[name] = true
+			}
+		}
+	}
+	if rawRoles, ok := current["roles"].([]any); ok {
+		for _, raw := range rawRoles {
+			role, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := role["name"].(string)
+			if name == "" || managed[name] {
+				continue
+			}
+			roleType, _ := role["role_type"].(string)
+			roles = append(roles, upstreamRole{Name: name, RoleType: roleType})
+		}
+	}
+
+	current["first_name"] = req.FirstName
+	current["last_name"] = req.LastName
+	current["email"] = req.Email
+	current["active"] = req.Active
+	current["publishers"] = req.Publishers
+	current["roles"] = roles
+
+	body, err := json.Marshal(current)
+	if err != nil {
+		http.Error(w, "failed to build upstream payload", http.StatusInternalServerError)
+		return
+	}
+
+	respBody, putStatus, putHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, "/admin/v2/users", accessToken, body, "application/json")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	writeProxyResponse(w, putStatus, respBody, putHeaders)
 }
 
 func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import PaginationControls from './PaginationControls.jsx'
 import CreateUserModal from './CreateUserModal.jsx'
+import EditUserModal from './EditUserModal.jsx'
 import { formatDateTime } from '../utils/dateUtils.js'
 
 export default function PublisherUsersTab({ publisherId, publisherName }) {
@@ -23,6 +24,7 @@ export default function PublisherUsersTab({ publisherId, publisherName }) {
   const [successMessage, setSuccessMessage] = useState('')
   const [searchParams, setSearchParams] = useSearchParams()
   const createOpen = searchParams.get('create') === '1'
+  const editUserId = searchParams.get('user')
 
   useEffect(() => { setPage(1) }, [committedSearch, accessFilter, statusFilter])
 
@@ -39,6 +41,21 @@ export default function PublisherUsersTab({ publisherId, publisherName }) {
     closeCreate()
     setSuccessMessage(message)
     setPage(1)
+    setRefreshKey(k => k + 1)
+  }
+
+  function openEdit(userId) {
+    setSuccessMessage('')
+    setSearchParams({ user: String(userId) }, { replace: true })
+  }
+
+  function closeEdit() {
+    setSearchParams({}, { replace: true })
+  }
+
+  function handleSaved(message) {
+    closeEdit()
+    setSuccessMessage(message)
     setRefreshKey(k => k + 1)
   }
 
@@ -113,7 +130,12 @@ export default function PublisherUsersTab({ publisherId, publisherName }) {
                   </thead>
                   <tbody>
                     {users.map((u, i) => (
-                      <tr key={u.id} style={i % 2 !== 0 ? tableStyles.rowAlt : undefined}>
+                      <tr
+                        key={u.id}
+                        className="clickable-row"
+                        style={i % 2 !== 0 ? tableStyles.rowAlt : undefined}
+                        onClick={() => openEdit(u.id)}
+                      >
                         <td style={tableStyles.td}><span style={s.idTag}>{u.id}</span></td>
                         <td style={tableStyles.td}>{u.first_name} {u.last_name}</td>
                         <td style={tableStyles.td}>{u.email}</td>
@@ -140,6 +162,15 @@ export default function PublisherUsersTab({ publisherId, publisherName }) {
           publisherName={publisherName}
           onClose={closeCreate}
           onCreated={handleCreated}
+        />
+      )}
+
+      {editUserId && (
+        <EditUserModal
+          publisherId={publisherId}
+          userId={editUserId}
+          onClose={closeEdit}
+          onSaved={handleSaved}
         />
       )}
     </div>

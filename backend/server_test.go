@@ -962,6 +962,294 @@ func TestCreatePublisherUser_DeleteStillBlocked(t *testing.T) {
 	}
 }
 
+// --- Get / update publisher user ---
+
+// Upstream UserV2Dto for user 77: mapped roles (reports Show, settings Create,
+// inventory Read Only) plus PUBLISHER_DEFAULT and an unmanaged custom role.
+const mockUserDetailBody = `{
+	"id": 77,
+	"first_name": "Old",
+	"last_name": "Name",
+	"email": "old@pub.com",
+	"user_type": "PUBLISHER",
+	"user_access": "CONSOLE",
+	"status": "Regular",
+	"active": true,
+	"exempt_remote_address_rule": true,
+	"business_unit": {"id": 3, "name": "Test BU"},
+	"roles": [
+		{"name": "PUBLISHER_DEFAULT", "role_type": "PUBLISHER"},
+		{"name": "REPORTS_READ_ONLY_PUBLISHER", "role_type": "PUBLISHER"},
+		{"name": "CHARTS_READ_ONLY_PUBLISHER", "role_type": "PUBLISHER"},
+		{"name": "SETTINGS_PUBLISHER", "role_type": "PUBLISHER"},
+		{"name": "SETTINGS_READ_ONLY_PUBLISHER", "role_type": "PUBLISHER"},
+		{"name": "INVENTORY_READ_ONLY_PUBLISHER", "role_type": "PUBLISHER"},
+		{"name": "SOME_CUSTOM_ROLE", "role_type": "PUBLISHER"}
+	],
+	"publishers": [{"id": 42, "name": "Test Pub"}]
+}`
+
+func validUpdateUserBody() map[string]any {
+	return map[string]any{
+		"first_name": "New",
+		"last_name":  "Name",
+		"email":      "new@pub.com",
+		"active":     false,
+		"publishers": []map[string]any{{"id": 43, "name": "Other Pub"}},
+		"accesses": map[string]string{
+			"reports":    "Show",
+			"operations": "Hide",
+			"settings":   "Hide",
+			"invoices":   "Show",
+			"inventory":  "Hide",
+			"clients":    "Hide",
+		},
+	}
+}
+
+func putUpdateUser(t *testing.T, appURL string, body map[string]any) *http.Response {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPut, appURL+"/api/publishers/42/users/77", bytes.NewReader(raw))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestGetPublisherUser_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users/77": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
+				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUserDetailBody))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/users/77", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["id"] != float64(77) {
+		t.Errorf("id: want 77, got %v", body["id"])
+	}
+	if body["user_type"] != "PUBLISHER" || body["user_access"] != "CONSOLE" {
+		t.Errorf("type/access: want PUBLISHER/CONSOLE, got %v/%v", body["user_type"], body["user_access"])
+	}
+	if body["active"] != true {
+		t.Errorf("active: want true, got %v", body["active"])
+	}
+
+	wantAccesses := map[string]any{
+		"reports":    "Show",
+		"operations": "Hide",
+		"settings":   "Create",
+		"invoices":   "Hide",
+		"inventory":  "Read Only",
+		"clients":    "Hide",
+	}
+	if got := body["accesses"]; !reflect.DeepEqual(got, wantAccesses) {
+		t.Errorf("accesses: want %v, got %v", wantAccesses, got)
+	}
+
+	pubs, _ := body["publishers"].([]any)
+	if len(pubs) != 1 {
+		t.Fatalf("publishers: want 1, got %d", len(pubs))
+	}
+	if pub := pubs[0].(map[string]any); pub["id"] != float64(42) || pub["name"] != "Test Pub" {
+		t.Errorf("publisher: want {42 Test Pub}, got %v", pub)
+	}
+}
+
+func TestUpdatePublisherUser_Success(t *testing.T) {
+	var upstreamPayload map[string]any
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users/77": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUserDetailBody))
+		},
+		"/admin/v2/users": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPut {
+				t.Errorf("method: want PUT, got %s", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&upstreamPayload); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":77,"first_name":"New"}`))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	resp := putUpdateUser(t, app.URL, validUpdateUserBody())
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	// Editable fields overridden.
+	if upstreamPayload["first_name"] != "New" || upstreamPayload["last_name"] != "Name" || upstreamPayload["email"] != "new@pub.com" {
+		t.Errorf("profile: got %v %v %v", upstreamPayload["first_name"], upstreamPayload["last_name"], upstreamPayload["email"])
+	}
+	if upstreamPayload["active"] != false {
+		t.Errorf("active: want false, got %v", upstreamPayload["active"])
+	}
+
+	// Untouched fields echoed from the fetched user.
+	if upstreamPayload["id"] != float64(77) {
+		t.Errorf("id: want 77, got %v", upstreamPayload["id"])
+	}
+	if upstreamPayload["user_type"] != "PUBLISHER" || upstreamPayload["user_access"] != "CONSOLE" {
+		t.Errorf("type/access: want PUBLISHER/CONSOLE, got %v/%v", upstreamPayload["user_type"], upstreamPayload["user_access"])
+	}
+	if upstreamPayload["status"] != "Regular" {
+		t.Errorf("status: want Regular, got %v", upstreamPayload["status"])
+	}
+	if upstreamPayload["exempt_remote_address_rule"] != true {
+		t.Errorf("exempt_remote_address_rule: want true, got %v", upstreamPayload["exempt_remote_address_rule"])
+	}
+	if bu, _ := upstreamPayload["business_unit"].(map[string]any); bu == nil || bu["id"] != float64(3) {
+		t.Errorf("business_unit must be echoed, got %v", upstreamPayload["business_unit"])
+	}
+
+	// Roles rebuilt from accesses; unmanaged role preserved; PUBLISHER_DEFAULT
+	// and the previous settings/inventory roles gone.
+	wantRoles := map[string]bool{
+		"REPORTS_READ_ONLY_PUBLISHER":  true,
+		"CHARTS_READ_ONLY_PUBLISHER":   true,
+		"INVOICES_READ_ONLY_PUBLISHER": true,
+		"SOME_CUSTOM_ROLE":             true,
+	}
+	if got := roleNames(upstreamPayload); !reflect.DeepEqual(got, wantRoles) {
+		t.Errorf("roles: want %v, got %v", wantRoles, got)
+	}
+
+	// Publishers replaced wholesale.
+	pubs, _ := upstreamPayload["publishers"].([]any)
+	if len(pubs) != 1 {
+		t.Fatalf("publishers: want 1, got %d", len(pubs))
+	}
+	if pub := pubs[0].(map[string]any); pub["id"] != float64(43) || pub["name"] != "Other Pub" {
+		t.Errorf("publisher: want {43 Other Pub}, got %v", pub)
+	}
+}
+
+func TestUpdatePublisherUser_RejectsNonPublisher(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users/77": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":77,"user_type":"ADMIN","roles":[],"publishers":[]}`))
+		},
+		"/admin/v2/users": func(_ http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream PUT must not be called for non-Publisher users")
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	resp := putUpdateUser(t, app.URL, validUpdateUserBody())
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", resp.StatusCode)
+	}
+	var errBody struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatal(err)
+	}
+	if errBody.Message == "" {
+		t.Error("error message must not be empty")
+	}
+}
+
+func TestUpdatePublisherUser_ValidationErrors(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users/77": func(_ http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream must not be called for invalid requests")
+		},
+		"/admin/v2/users": func(_ http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream must not be called for invalid requests")
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"missing first_name", func(b map[string]any) { b["first_name"] = " " }},
+		{"missing email", func(b map[string]any) { b["email"] = "" }},
+		{"no publishers", func(b map[string]any) { b["publishers"] = []map[string]any{} }},
+		{"all accesses Hide", func(b map[string]any) {
+			b["accesses"].(map[string]string)["reports"] = "Hide"
+			b["accesses"].(map[string]string)["invoices"] = "Hide"
+		}},
+		{"invalid access value", func(b map[string]any) { b["accesses"].(map[string]string)["reports"] = "Create" }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := validUpdateUserBody()
+			tc.mutate(body)
+			resp := putUpdateUser(t, app.URL, body)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status: want 400, got %d", resp.StatusCode)
+			}
+			var errBody struct {
+				Message string `json:"message"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+				t.Fatal(err)
+			}
+			if errBody.Message == "" {
+				t.Error("error message must not be empty")
+			}
+		})
+	}
+}
+
+func TestUpdatePublisherUser_DeleteStillBlocked(t *testing.T) {
+	upstream := mockUpstream(t, nil)
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/users/77", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: want 405, got %d", resp.StatusCode)
+	}
+}
+
 // --- Placement report ---
 
 func TestPlacementReport_Success(t *testing.T) {

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api.js'
-import { useDebounce } from '../hooks/useDebounce.js'
+import PublisherMultiSelect from './PublisherMultiSelect.jsx'
 
-const USER_TYPES = ['Publisher', 'Admin', 'Buyer', 'DMP']
+export const USER_TYPES = ['Publisher', 'Admin', 'Buyer', 'DMP']
 
-const ACCESS_FIELDS = [
+export const ACCESS_FIELDS = [
   { key: 'reports',    label: 'Reports & Dashboards',  options: ['Show', 'Hide'] },
   { key: 'operations', label: 'Operations (Legacy UI)', options: ['Create', 'Read Only', 'Hide'] },
   { key: 'settings',   label: 'Settings',               options: ['Create', 'Read Only', 'Hide'] },
@@ -36,10 +36,6 @@ export default function CreateUserModal({ publisherId, publisherName, onClose, o
     publisherName ? [{ id: Number(publisherId), name: publisherName }] : []
   )
 
-  const [pubSearch, setPubSearch] = useState('')
-  const committedPubSearch = useDebounce(pubSearch, 300)
-  const [pubOptions, setPubOptions] = useState([])
-
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -49,19 +45,6 @@ export default function CreateUserModal({ publisherId, publisherName, onClose, o
     if (!publisherName) return
     setPublishers(prev => prev.length === 0 ? [{ id: Number(publisherId), name: publisherName }] : prev)
   }, [publisherId, publisherName])
-
-  useEffect(() => {
-    if (!committedPubSearch.trim()) {
-      setPubOptions([])
-      return
-    }
-    const controller = new AbortController()
-    apiFetch(`/publishers?search=${encodeURIComponent(committedPubSearch)}&limit=20`, { signal: controller.signal })
-      .then(res => res.json())
-      .then(data => setPubOptions(data.publishers ?? []))
-      .catch(() => {})
-    return () => controller.abort()
-  }, [committedPubSearch])
 
   function handleAccessTypeChange(type) {
     setAccessType(type)
@@ -79,16 +62,6 @@ export default function CreateUserModal({ publisherId, publisherName, onClose, o
       setDestinationEmail('')
       setAccesses(CONSOLE_ACCESS_DEFAULTS)
     }
-  }
-
-  function addPublisher(pub) {
-    setPublishers(prev => prev.some(p => p.id === pub.id) ? prev : [...prev, { id: pub.id, name: pub.name }])
-    setPubSearch('')
-    setPubOptions([])
-  }
-
-  function removePublisher(id) {
-    setPublishers(prev => prev.filter(p => p.id !== id))
   }
 
   async function handleSubmit() {
@@ -211,32 +184,7 @@ export default function CreateUserModal({ publisherId, publisherName, onClose, o
           <h4 style={s.sectionTitle}>Permissions</h4>
           <div style={s.fieldRow}>
             <span style={s.fieldLabel}>Publishers</span>
-            <div style={s.pubSelect}>
-              <div style={s.chips}>
-                {publishers.map(p => (
-                  <span key={p.id} style={s.chip}>
-                    {p.name} ({p.id})
-                    <button style={s.chipRemove} onClick={() => removePublisher(p.id)} aria-label={`Remove ${p.name}`}>×</button>
-                  </span>
-                ))}
-                <input
-                  style={s.chipInput}
-                  type="text"
-                  placeholder="+ Publisher"
-                  value={pubSearch}
-                  onChange={e => setPubSearch(e.target.value)}
-                />
-              </div>
-              {pubOptions.length > 0 && (
-                <div style={s.dropdown}>
-                  {pubOptions.filter(o => !publishers.some(p => p.id === o.id)).map(o => (
-                    <div key={o.id} style={s.dropdownItem} className="clickable-row" onClick={() => addPublisher(o)}>
-                      {o.name} <span style={s.dropdownId}>({o.id})</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <PublisherMultiSelect value={publishers} onChange={setPublishers} />
           </div>
 
           <div style={s.accessGrid}>
@@ -268,7 +216,7 @@ export default function CreateUserModal({ publisherId, publisherName, onClose, o
   )
 }
 
-const s = {
+export const modalStyles = {
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
   modal: { background: '#fff', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.2)', padding: '1.75rem', width: '100%', maxWidth: 640, maxHeight: '90vh', display: 'flex', flexDirection: 'column', position: 'relative' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexShrink: 0 },
@@ -285,15 +233,6 @@ const s = {
   radioLabelDisabled: { display: 'flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.875rem', color: '#9ca3af' },
   input: { flex: 1, padding: '0.375rem 0.625rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', outline: 'none', boxSizing: 'border-box' },
 
-  pubSelect: { flex: 1, position: 'relative' },
-  chips: { display: 'flex', flexWrap: 'wrap', gap: '0.375rem', alignItems: 'center', border: '1px solid #d1d5db', borderRadius: 4, padding: '0.25rem 0.375rem' },
-  chip: { display: 'inline-flex', alignItems: 'center', gap: '0.25rem', background: '#eef2ff', color: '#3730a3', borderRadius: 4, padding: '0.125rem 0.375rem', fontSize: '0.8125rem' },
-  chipRemove: { background: 'none', border: 'none', cursor: 'pointer', color: '#3730a3', fontSize: '0.9375rem', lineHeight: 1, padding: 0 },
-  chipInput: { flex: 1, minWidth: 110, border: 'none', outline: 'none', fontSize: '0.875rem', color: '#111827', padding: '0.25rem' },
-  dropdown: { position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #d1d5db', borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.12)', zIndex: 10, maxHeight: 200, overflowY: 'auto' },
-  dropdownItem: { padding: '0.4375rem 0.75rem', fontSize: '0.875rem', color: '#111827', cursor: 'pointer' },
-  dropdownId: { color: '#6b7280' },
-
   accessGrid: { marginTop: '0.5rem' },
   accessRow: { display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' },
   accessLabel: { fontSize: '0.875rem', color: '#111827', minWidth: 170 },
@@ -303,3 +242,5 @@ const s = {
   cancelBtn: { padding: '0.4375rem 1.25rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem' },
   error: { color: '#dc2626', fontSize: '0.875rem', marginTop: '0.75rem' },
 }
+
+const s = modalStyles
