@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-06-10
+
+### Features
+- Added shareable screen URL and Copy VAST Tag button on placement screens
+
 ## 2026-06-08
 
 ### Features
