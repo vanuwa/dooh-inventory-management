@@ -32,6 +32,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /api/publishers/{id}", publishersHandler.Publisher)
 	mux.HandleFunc("GET /api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
 	mux.HandleFunc("GET /api/publishers/{id}/users", publishersHandler.PublisherUsers)
+	mux.HandleFunc("POST /api/publishers/{id}/users", publishersHandler.CreatePublisherUser)
 	mux.HandleFunc("GET /api/publishers/{publisherId}/placements/{placementId}/dooh-settings/{screenId}", publishersHandler.GetPlacementDoohSettingItem)
 	mux.HandleFunc("GET /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.GetPlacementDoohSettings)
 	mux.HandleFunc("PUT /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PutPlacementDoohSettings)
@@ -81,7 +82,8 @@ func writeAllowed(path string) bool {
 	}
 	if strings.HasPrefix(path, "/api/publishers/") {
 		return strings.HasSuffix(path, "/bulk-upload-jobs") ||
-			strings.HasSuffix(path, "/dooh-settings")
+			strings.HasSuffix(path, "/dooh-settings") ||
+			strings.HasSuffix(path, "/users")
 	}
 	return false
 }

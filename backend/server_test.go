@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -139,6 +141,84 @@ func TestLogin_EmptyBody(t *testing.T) {
 	}
 }
 
+func TestRefresh_Success(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, r *http.Request) {
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.FormValue("grant_type"); got != "refresh_token" {
+				t.Errorf("grant_type: want %q, got %q", "refresh_token", got)
+			}
+			if got := r.FormValue("refresh_token"); got != "mock-refresh-token" {
+				t.Errorf("refresh_token: want %q, got %q", "mock-refresh-token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	resp, err := http.Post(app.URL+"/api/auth/refresh", "application/json",
+		strings.NewReader(`{"refresh_token":"mock-refresh-token"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["access_token"] != "new-access-token" {
+		t.Errorf("access_token: want %q, got %q", "new-access-token", body["access_token"])
+	}
+	if body["refresh_token"] != "new-refresh-token" {
+		t.Errorf("refresh_token: want %q, got %q", "new-refresh-token", body["refresh_token"])
+	}
+}
+
+func TestRefresh_MissingToken(t *testing.T) {
+	app := appServer(t, "http://unused")
+
+	resp, err := http.Post(app.URL+"/api/auth/refresh", "application/json",
+		strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: want 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestRefresh_UpstreamRejects_Returns401(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	resp, err := http.Post(app.URL+"/api/auth/refresh", "application/json",
+		strings.NewReader(`{"refresh_token":"expired-refresh-token"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: want 401, got %d", resp.StatusCode)
+	}
+}
+
 // --- Proxy / user details ---
 
 func TestUserDetails_Success(t *testing.T) {
@@ -156,7 +236,6 @@ func TestUserDetails_Success(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/user/details", nil)
 	req.Header.Set("X-Access-Token", "mock-access-token")
-	req.Header.Set("X-Refresh-Token", "mock-refresh-token")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -173,66 +252,17 @@ func TestUserDetails_Success(t *testing.T) {
 	}
 }
 
-func TestUserDetails_TokenRefreshOnExpiry(t *testing.T) {
-	userCallCount := 0
+// Refresh is client-driven: the backend passes upstream 401s through untouched
+// so the frontend can refresh via POST /api/auth/refresh and retry.
+func TestUserDetails_Upstream401PassesThrough(t *testing.T) {
+	refreshCalled := false
 
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/common/v1/user-details": func(w http.ResponseWriter, r *http.Request) {
-			userCallCount++
-			if userCallCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			if got := r.Header.Get("Authorization"); got != "Bearer new-access-token" {
-				t.Errorf("retry Authorization: want %q, got %q", "Bearer new-access-token", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockUserBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, r *http.Request) {
-			if err := r.ParseForm(); err != nil {
-				t.Fatalf("parse form: %v", err)
-			}
-			if got := r.FormValue("grant_type"); got != "refresh_token" {
-				t.Errorf("grant_type: want %q, got %q", "refresh_token", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/user/details", nil)
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
-	}
-	if userCallCount != 2 {
-		t.Errorf("upstream user-details calls: want 2, got %d", userCallCount)
-	}
-}
-
-func TestUserDetails_RefreshFails_Returns401(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/common/v1/user-details": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 		},
 		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			refreshCalled = true
 			w.WriteHeader(http.StatusUnauthorized)
 		},
 	})
@@ -241,7 +271,6 @@ func TestUserDetails_RefreshFails_Returns401(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/user/details", nil)
 	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "expired-refresh-token")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -251,6 +280,9 @@ func TestUserDetails_RefreshFails_Returns401(t *testing.T) {
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status: want 401, got %d", resp.StatusCode)
+	}
+	if refreshCalled {
+		t.Error("backend must not call /oauth/token; refresh is client-driven")
 	}
 }
 
@@ -368,75 +400,6 @@ func TestPublishers_ActivePassthrough(t *testing.T) {
 	}
 }
 
-func TestPublishers_TokenRefresh(t *testing.T) {
-	callCount := 0
-
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
-			callCount++
-			if callCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockPublisherListBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
-	}
-}
-
-func TestPublishers_RefreshFails_Returns401(t *testing.T) {
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusUnauthorized)
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusUnauthorized)
-		},
-	})
-
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "expired-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status: want 401, got %d", resp.StatusCode)
-	}
-}
-
 func TestPublisherDetail_Success(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/admin/v1/publishers/42": func(w http.ResponseWriter, r *http.Request) {
@@ -506,48 +469,6 @@ func TestPublisherPlacements_Success(t *testing.T) {
 	}
 	if len(body.Placements) != 2 {
 		t.Errorf("placements: want 2, got %d", len(body.Placements))
-	}
-}
-
-func TestPublisherPlacements_TokenRefresh(t *testing.T) {
-	callCount := 0
-
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, _ *http.Request) {
-			callCount++
-			if callCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockPubPlacementsBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements", nil)
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
 	}
 }
 
@@ -623,48 +544,6 @@ func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-}
-
-func TestPlacementDoohSettings_TokenRefresh(t *testing.T) {
-	callCount := 0
-
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
-			callCount++
-			if callCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockDoohSettingsBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings", nil)
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
 	}
 }
 
@@ -847,6 +726,242 @@ func TestPublisherUsers_FiltersPassthrough(t *testing.T) {
 	}
 }
 
+// --- Create publisher user ---
+
+func validCreateUserBody() map[string]any {
+	return map[string]any{
+		"user_access": "CONSOLE",
+		"first_name":  "Jane",
+		"last_name":   "Doe",
+		"email":       "jane@pub.com",
+		"publishers":  []map[string]any{{"id": 42, "name": "Test Pub"}},
+		"accesses": map[string]string{
+			"reports":    "Show",
+			"operations": "Hide",
+			"settings":   "Hide",
+			"invoices":   "Hide",
+			"inventory":  "Hide",
+			"clients":    "Hide",
+		},
+	}
+}
+
+func postCreateUser(t *testing.T, appURL string, body map[string]any) *http.Response {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, appURL+"/api/publishers/42/users", bytes.NewReader(raw))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func roleNames(payload map[string]any) map[string]bool {
+	names := map[string]bool{}
+	roles, _ := payload["roles"].([]any)
+	for _, r := range roles {
+		role := r.(map[string]any)
+		names[role["name"].(string)] = true
+		if rt := role["role_type"]; rt != "PUBLISHER" {
+			names["BAD_ROLE_TYPE:"+role["name"].(string)] = true
+		}
+	}
+	return names
+}
+
+func TestCreatePublisherUser_ConsoleSuccess(t *testing.T) {
+	var upstreamPayload map[string]any
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("method: want POST, got %s", r.Method)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer mock-access-token" {
+				t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", got)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&upstreamPayload); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":555,"first_name":"Jane"}`))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	body := validCreateUserBody()
+	body["accesses"].(map[string]string)["settings"] = "Read Only"
+	resp := postCreateUser(t, app.URL, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d", resp.StatusCode)
+	}
+
+	if got := upstreamPayload["user_type"]; got != "PUBLISHER" {
+		t.Errorf("user_type: want PUBLISHER, got %v", got)
+	}
+	if got := upstreamPayload["user_access"]; got != "CONSOLE" {
+		t.Errorf("user_access: want CONSOLE, got %v", got)
+	}
+	if got := upstreamPayload["status"]; got != "Regular" {
+		t.Errorf("status: want Regular, got %v", got)
+	}
+	if got := upstreamPayload["active"]; got != true {
+		t.Errorf("active: want true, got %v", got)
+	}
+	if got := upstreamPayload["exempt_remote_address_rule"]; got != true {
+		t.Errorf("exempt_remote_address_rule: want true, got %v", got)
+	}
+	if _, present := upstreamPayload["destination_email"]; present {
+		t.Error("destination_email must be omitted for CONSOLE users")
+	}
+
+	wantRoles := map[string]bool{
+		"REPORTS_READ_ONLY_PUBLISHER":  true,
+		"CHARTS_READ_ONLY_PUBLISHER":   true,
+		"SETTINGS_READ_ONLY_PUBLISHER": true,
+	}
+	if got := roleNames(upstreamPayload); !reflect.DeepEqual(got, wantRoles) {
+		t.Errorf("roles: want %v, got %v", wantRoles, got)
+	}
+
+	pubs, _ := upstreamPayload["publishers"].([]any)
+	if len(pubs) != 1 {
+		t.Fatalf("publishers: want 1, got %d", len(pubs))
+	}
+	if pub := pubs[0].(map[string]any); pub["id"] != float64(42) || pub["name"] != "Test Pub" {
+		t.Errorf("publisher: want {42 Test Pub}, got %v", pub)
+	}
+
+	var created map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created["id"] != float64(555) {
+		t.Errorf("created id: want 555, got %v", created["id"])
+	}
+}
+
+func TestCreatePublisherUser_APISuccess(t *testing.T) {
+	var upstreamPayload map[string]any
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users": func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&upstreamPayload); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":556,"clientId":"abc"}`))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	body := validCreateUserBody()
+	body["user_access"] = "API"
+	body["destination_email"] = "ops@improvedigital.com"
+	body["accesses"] = map[string]string{
+		"reports":    "Show",
+		"operations": "Hide",
+		"settings":   "Create",
+		"invoices":   "Show",
+		"inventory":  "Create",
+		"clients":    "Hide",
+	}
+	resp := postCreateUser(t, app.URL, body)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d", resp.StatusCode)
+	}
+	if got := upstreamPayload["user_access"]; got != "API" {
+		t.Errorf("user_access: want API, got %v", got)
+	}
+	if got := upstreamPayload["destination_email"]; got != "ops@improvedigital.com" {
+		t.Errorf("destination_email: want ops@improvedigital.com, got %v", got)
+	}
+
+	wantRoles := map[string]bool{
+		"REPORTS_READ_ONLY_PUBLISHER":   true,
+		"CHARTS_READ_ONLY_PUBLISHER":    true,
+		"SETTINGS_PUBLISHER":            true,
+		"SETTINGS_READ_ONLY_PUBLISHER":  true,
+		"INVOICES_READ_ONLY_PUBLISHER":  true,
+		"INVENTORY_PUBLISHER":           true,
+		"INVENTORY_READ_ONLY_PUBLISHER": true,
+	}
+	if got := roleNames(upstreamPayload); !reflect.DeepEqual(got, wantRoles) {
+		t.Errorf("roles: want %v, got %v", wantRoles, got)
+	}
+}
+
+func TestCreatePublisherUser_ValidationErrors(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v2/users": func(_ http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream must not be called for invalid requests")
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"bad user_access", func(b map[string]any) { b["user_access"] = "Publisher" }},
+		{"missing first_name", func(b map[string]any) { b["first_name"] = " " }},
+		{"missing email", func(b map[string]any) { b["email"] = "" }},
+		{"missing destination_email for API", func(b map[string]any) { b["user_access"] = "API" }},
+		{"no publishers", func(b map[string]any) { b["publishers"] = []map[string]any{} }},
+		{"all accesses Hide", func(b map[string]any) { b["accesses"].(map[string]string)["reports"] = "Hide" }},
+		{"invalid access value", func(b map[string]any) { b["accesses"].(map[string]string)["invoices"] = "Create" }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := validCreateUserBody()
+			tc.mutate(body)
+			resp := postCreateUser(t, app.URL, body)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status: want 400, got %d", resp.StatusCode)
+			}
+			var errBody struct {
+				Message string `json:"message"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+				t.Fatal(err)
+			}
+			if errBody.Message == "" {
+				t.Error("error message must not be empty")
+			}
+		})
+	}
+}
+
+func TestCreatePublisherUser_DeleteStillBlocked(t *testing.T) {
+	upstream := mockUpstream(t, nil)
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/users", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: want 405, got %d", resp.StatusCode)
+	}
+}
+
 // --- Placement report ---
 
 func TestPlacementReport_Success(t *testing.T) {
@@ -1011,47 +1126,6 @@ func TestPlacementReport_PlacementFilter(t *testing.T) {
 	}
 }
 
-func TestPlacementReport_TokenRefresh(t *testing.T) {
-	callCount := 0
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/report/preview": func(w http.ResponseWriter, _ *http.Request) {
-			callCount++
-			if callCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockReportPreviewBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
-		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
-	}
-}
-
 // --- Placement report generation ---
 
 func TestGeneratePlacementReport_Success(t *testing.T) {
@@ -1118,47 +1192,6 @@ func TestGeneratePlacementReport_ReportFormatIsCSV(t *testing.T) {
 	}
 }
 
-func TestGeneratePlacementReport_TokenRefresh(t *testing.T) {
-	callCount := 0
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/report/generation": func(w http.ResponseWriter, _ *http.Request) {
-			callCount++
-			if callCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockGenerationStatusBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/generate/placement/42/101",
-		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
-	}
-}
-
 func TestPlacementReportStatus_Success(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/report/generation-status/abc123": func(w http.ResponseWriter, _ *http.Request) {
@@ -1190,46 +1223,6 @@ func TestPlacementReportStatus_Success(t *testing.T) {
 	}
 	if body["report_download_url"] == "" {
 		t.Error("report_download_url: want non-empty")
-	}
-}
-
-func TestPlacementReportStatus_TokenRefresh(t *testing.T) {
-	callCount := 0
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/report/generation-status/abc123": func(w http.ResponseWriter, _ *http.Request) {
-			callCount++
-			if callCount == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockGenerationStatusBody))
-		},
-		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockNewTokenBody))
-		},
-	})
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/report/status/abc123", nil)
-	req.Header.Set("X-Access-Token", "expired-token")
-	req.Header.Set("X-Refresh-Token", "valid-refresh-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
-	}
-	if got := resp.Header.Get("X-New-Access-Token"); got != "new-access-token" {
-		t.Errorf("X-New-Access-Token: want %q, got %q", "new-access-token", got)
-	}
-	if got := resp.Header.Get("X-New-Refresh-Token"); got != "new-refresh-token" {
-		t.Errorf("X-New-Refresh-Token: want %q, got %q", "new-refresh-token", got)
 	}
 }
 

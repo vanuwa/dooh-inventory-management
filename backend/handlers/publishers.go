@@ -436,6 +436,144 @@ func (h *PublishersHandler) GetPlacementDoohSettingItem(w http.ResponseWriter, r
 	writeJSON(w, map[string]any{"dooh_setting": item})
 }
 
+type createUserRequest struct {
+	UserAccess       string            `json:"user_access"`
+	FirstName        string            `json:"first_name"`
+	LastName         string            `json:"last_name"`
+	Email            string            `json:"email"`
+	DestinationEmail string            `json:"destination_email"`
+	Publishers       []IdName          `json:"publishers"`
+	Accesses         map[string]string `json:"accesses"`
+}
+
+type IdName struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type upstreamRole struct {
+	Name     string `json:"name"`
+	RoleType string `json:"role_type"`
+}
+
+// accessRoleMap maps each permission area and chosen level to the upstream
+// 360Yield publisher role names ("Create" implies the read-only role too).
+var accessRoleMap = map[string]map[string][]string{
+	"reports": {
+		"Show": {"REPORTS_READ_ONLY_PUBLISHER", "CHARTS_READ_ONLY_PUBLISHER"},
+		"Hide": {},
+	},
+	"operations": {
+		"Create":    {"OPERATIONS_PUBLISHER", "OPERATIONS_READ_ONLY_PUBLISHER"},
+		"Read Only": {"OPERATIONS_READ_ONLY_PUBLISHER"},
+		"Hide":      {},
+	},
+	"settings": {
+		"Create":    {"SETTINGS_PUBLISHER", "SETTINGS_READ_ONLY_PUBLISHER"},
+		"Read Only": {"SETTINGS_READ_ONLY_PUBLISHER"},
+		"Hide":      {},
+	},
+	"invoices": {
+		"Show": {"INVOICES_READ_ONLY_PUBLISHER"},
+		"Hide": {},
+	},
+	"inventory": {
+		"Create":    {"INVENTORY_PUBLISHER", "INVENTORY_READ_ONLY_PUBLISHER"},
+		"Read Only": {"INVENTORY_READ_ONLY_PUBLISHER"},
+		"Hide":      {},
+	},
+	"clients": {
+		"Create":    {"CLIENTS_PUBLISHER", "CLIENTS_READ_ONLY_PUBLISHER"},
+		"Read Only": {"CLIENTS_READ_ONLY_PUBLISHER"},
+		"Hide":      {},
+	},
+}
+
+func writeErrorJSON(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"message": message})
+}
+
+// CreatePublisherUser handles POST /api/publishers/{id}/users. It accepts a
+// narrow request shape and builds the upstream UserV2Dto itself, so only
+// PUBLISHER users with whitelisted roles can ever be created through this portal.
+func (h *PublishersHandler) CreatePublisherUser(w http.ResponseWriter, r *http.Request) {
+	accessToken := r.Header.Get("X-Access-Token")
+
+	var req createUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if req.UserAccess != "CONSOLE" && req.UserAccess != "API" {
+		writeErrorJSON(w, http.StatusBadRequest, `user_access must be "CONSOLE" or "API"`)
+		return
+	}
+	if strings.TrimSpace(req.FirstName) == "" || strings.TrimSpace(req.LastName) == "" || strings.TrimSpace(req.Email) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "first_name, last_name and email are required")
+		return
+	}
+	if req.UserAccess == "API" && strings.TrimSpace(req.DestinationEmail) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "destination_email is required for API users")
+		return
+	}
+	if len(req.Publishers) == 0 {
+		writeErrorJSON(w, http.StatusBadRequest, "at least one publisher is required")
+		return
+	}
+
+	roles := []upstreamRole{}
+	for area, levels := range accessRoleMap {
+		level := req.Accesses[area]
+		if level == "" {
+			level = "Hide"
+		}
+		names, ok := levels[level]
+		if !ok {
+			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("invalid value %q for access %q", level, area))
+			return
+		}
+		for _, name := range names {
+			roles = append(roles, upstreamRole{Name: name, RoleType: "PUBLISHER"})
+		}
+	}
+	if len(roles) == 0 {
+		writeErrorJSON(w, http.StatusBadRequest, "at least one access must not be Hide")
+		return
+	}
+
+	payload := map[string]any{
+		"first_name":                 req.FirstName,
+		"last_name":                  req.LastName,
+		"email":                      req.Email,
+		"user_type":                  "PUBLISHER",
+		"user_access":                req.UserAccess,
+		"status":                     "Regular",
+		"active":                     true,
+		"exempt_remote_address_rule": true,
+		"roles":                      roles,
+		"publishers":                 req.Publishers,
+	}
+	if req.UserAccess == "API" {
+		payload["destination_email"] = req.DestinationEmail
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "failed to build upstream payload", http.StatusInternalServerError)
+		return
+	}
+
+	respBody, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/admin/v2/users", accessToken, body, "application/json")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	writeProxyResponse(w, status, respBody, upHeaders)
+}
+
 func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")

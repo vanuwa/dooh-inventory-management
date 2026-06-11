@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Start / stop everything (Docker):**
 ```bash
-make up            # docker compose up -d --build --force-recreate
+make up            # docker compose up -d --build --force-recreate (passes GIT_COMMIT/GIT_BRANCH)
 make down          # docker compose down --rmi all --remove-orphans
 make rebuild-api   # rebuild and restart the api container only
-make rebuild-ui    # rebuild and restart the ui container only
+make rebuild-ui    # rebuild and restart the ui container only (passes GIT_COMMIT/GIT_BRANCH)
 ```
 
 **Backend (Go):**
@@ -30,7 +30,7 @@ npm run build  # production build into dist/
 
 ## Architecture
 
-Read-only SSP inventory management portal for DOOH operations. Proxies the Improve Digital (360Yield) API — no local database.
+Inventory management portal for DOOH operations, mostly read-only with a few explicit write paths. Proxies the SSP API — no local database.
 
 - **Backend:** Go stdlib HTTP (no external deps) at `backend/`
 - **Frontend:** React 19 + React Router 7 + Vite 6 at `frontend/`
@@ -38,69 +38,86 @@ Read-only SSP inventory management portal for DOOH operations. Proxies the Impro
 
 ### Auth & Token Flow
 
-1. Frontend POSTs credentials to `POST /api/auth/login` → Go calls upstream `/oauth/token` (password grant) → returns `{access_token, refresh_token}`.
-2. Authenticated requests carry tokens in `X-Access-Token` / `X-Refresh-Token` headers.
-3. Backend auto-refreshes on 401 and retries; new tokens returned in `X-New-Access-Token` / `X-New-Refresh-Token` response headers.
-4. `frontend/src/api.js` reads those headers, updates localStorage, and triggers logout on terminal 401.
-5. Login page uses raw `fetch` (not `apiFetch`) because tokens don't exist yet.
+1. Frontend POSTs credentials to `POST /api/auth/login` → Go calls upstream `/oauth/token` (password grant) → returns `{access_token, refresh_token}`; frontend stores both in localStorage.
+2. Authenticated requests carry only `X-Access-Token` (see `frontend/src/api.js`).
+3. On a 401, the frontend calls `POST /api/auth/refresh` with the refresh token in the JSON body, stores the new tokens, and retries the original request once. Concurrent refreshes are deduplicated via a shared `pendingRefresh` promise. A failed refresh triggers logout.
+4. Login page uses raw `fetch` (not `apiFetch`) because tokens don't exist yet.
 
-The upstream OAuth response has a non-standard shape — `{value, refreshToken: {value}}`. `handlers/auth.go` normalizes it to `{access_token, refresh_token}`.
+The upstream OAuth response has a non-standard shape — `{value, refreshToken: {value}}`. `handlers/auth.go` normalizes it to `{access_token, refresh_token}` for both login and refresh.
 
-### Read-only Enforcement
+### Write Allowlist (mostly read-only)
 
-A middleware in `main.go` blocks all non-GET requests except `/api/auth/login` and `/api/report/*`. No mutations are possible through this portal.
+`readOnlyMiddleware` in `main.go` blocks all non-GET requests except paths in `writeAllowed`: auth endpoints, `/api/report/*` (report generation), `.../dooh-settings` (PUT screen edits), and `.../bulk-upload-jobs` (POST file upload). When registering a new write-capable route, you must also add it to `writeAllowed`.
 
 ### Backend Layout (`backend/`)
 
 | Path | Purpose |
 |---|---|
-| `main.go` | Server setup, route registration, CORS + read-only middleware |
+| `main.go` | Server setup, route registration, CORS + read-only middleware with `writeAllowed` allowlist |
 | `config/config.go` | Env var loading (`IMPROVE_*`, `FRONTEND_ORIGIN`, `PORT`) |
-| `handlers/auth.go` | `POST /api/auth/login` — OAuth password grant, normalizes token shape |
-| `handlers/proxy.go` | Core `doRequest` + `refreshAndRetry` helpers used by all handlers |
-| `handlers/publishers.go` | Publishers list/detail, placements, DOOH settings |
-| `handlers/report.go` | Report preview, generation, and status polling |
-| `server_test.go` | ~1200-line unit test suite with a mock upstream server |
+| `handlers/auth.go` | Login + refresh — OAuth password/refresh grants, normalizes token shape |
+| `handlers/proxy.go` | Core `doRequest`, `writeJSON`, `writeProxyResponse` helpers used by all handlers |
+| `handlers/publishers.go` | Publishers list/detail, placements, users, DOOH settings (list/item/PUT), `resolveTotal` pagination helper |
+| `handlers/report.go` | Report preview, generation, and status polling for placements and publishers |
+| `handlers/bulk_upload_jobs.go` | Bulk upload jobs list + create (multipart file upload) |
+| `server_test.go` | Unit test suite with a mock upstream server |
 
 ### API Routes
 
 ```
 POST /api/auth/login
+POST /api/auth/refresh
 GET  /api/user/details
 GET  /api/publishers?page&limit&search&active
 GET  /api/publishers/{id}
-GET  /api/publishers/{id}/placements
+GET  /api/publishers/{id}/placements?page&limit&search&active        ← server-side paginated
+GET  /api/publishers/{id}/users
 GET  /api/publishers/{publisherId}/placements/{placementId}/dooh-settings?page&limit&search&sort
-POST /api/report/placement/{publisherId}/{placementId}           ← preview
-POST /api/report/generate/placement/{publisherId}/{placementId}  ← start CSV generation
-GET  /api/report/status/{reportGenerationId}                     ← poll until FINISHED_OK
+GET  /api/publishers/{publisherId}/placements/{placementId}/dooh-settings/{screenId}
+PUT  /api/publishers/{publisherId}/placements/{placementId}/dooh-settings   ← edit screen
+GET  /api/publishers/{publisherId}/bulk-upload-jobs
+POST /api/publishers/{publisherId}/bulk-upload-jobs                  ← upload file
+POST /api/report/placement/{publisherId}/{placementId}              ← preview
+POST /api/report/generate/placement/{publisherId}/{placementId}     ← start CSV generation
+POST /api/report/publisher/{publisherId}                            ← preview
+POST /api/report/generate/publisher/{publisherId}                   ← start CSV generation
+GET  /api/report/status/{reportGenerationId}                        ← poll until FINISHED_OK
 ```
 
 ### Frontend Layout (`frontend/src/`)
 
 | Path | Purpose |
 |---|---|
-| `App.jsx` | Router + `AuthProvider` + route definitions |
+| `App.jsx` | Router + `AuthProvider`; catch-all redirects to `/recent` (landing page) |
 | `context/AuthContext.jsx` | Auth state, localStorage sync, login/logout |
-| `api.js` | Fetch wrapper: attaches tokens, handles header-based token refresh |
-| `pages/Login.jsx` | Login form |
-| `pages/Publishers.jsx` | Paginated/searchable publishers table (landing page) |
-| `pages/PublisherDetail.jsx` | Publisher metadata + client-side filtered placements list |
-| `pages/PlacementDetail.jsx` | Two-tab UI: Screens grid (server-side paginated) + Reporting tab |
+| `api.js` | Fetch wrapper: attaches `X-Access-Token`, client-driven refresh + retry on 401 |
+| `pages/RecentActivity.jsx` | Landing page — localStorage-backed visit history with color-coded page-type badges |
+| `pages/Publishers.jsx` | Paginated/searchable publishers table |
+| `pages/PublisherDetail.jsx` | Tabs: Placements, Bulk Upload Jobs, Users, Reporting |
+| `pages/PlacementDetail.jsx` | Tabs: Screens grid + Reporting; screen view/edit modal, Copy VAST Tag |
+| `pages/Changelog.jsx` | Renders `CHANGELOG.md` (copied into `public/` at Docker build) |
 | `pages/UserPage.jsx` | User profile (email, business unit, roles) |
-| `components/Layout.jsx` | Header with nav, user avatar, logout |
-| `components/ProtectedRoute.jsx` | Redirects unauthenticated users to `/login` |
-| `components/StatusBadge.jsx` | Reusable active/inactive badge |
+| `components/Layout.jsx` | Header with nav, user avatar, logout, outdated-version banner |
+| `components/ReportingTab.jsx` | Shared reporting UI (placement + publisher), driven by `hooks/useReportTab.js` |
+| `components/BulkUploadJobsTab.jsx` | Jobs grid with per-task detail modal + file upload |
+| `components/PublisherUsersTab.jsx` | Publisher users grid |
+| `components/PaginationControls.jsx` | Shared pagination controls |
+| `hooks/` | `useDebounce`, `useReportTab`, `useRecentActivity`, `useVersionCheck` |
+| `styles/` | Shared inline-style objects (`tables.js`, `tabs.js`) — not CSS files |
+| `utils/dateUtils.js`, `constants/pageTypes.js` | Date helpers, page-type badge constants |
 
 ### Key Implementation Details
 
-- **No CSS files** — all styling is inline style objects in JSX. Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg).
-- **Client-side filtering:** `PublisherDetail` loads all placements once and filters in React state. `PlacementDetail` screens use server-side pagination.
-- **Debounced search:** 300ms delay before fetching in Publishers and PlacementDetail screens tab.
-- **Abort signals:** All async fetch operations use `AbortController` to cancel in-flight requests on unmount.
-- **Report polling:** CSV generation polls `/report/status` every 2 seconds, up to 60 attempts (2-minute timeout).
-- **Upstream API typo:** The 360Yield API returns `totalNumberOfElemements` (missing an 's'). `handlers/publishers.go` handles both spellings and falls back to the `X-360-Content-Range` header.
+- **No CSS files** — all styling is inline style objects in JSX (shared ones in `src/styles/`). Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg).
+- **Tabs and modals are URL-reflected:** tabs are routes (e.g. `/publishers/:id/users`, `.../placements/:placementId/screens`); the screens modal uses a `?screen={id}` search param so screen URLs are shareable.
+- **Server-side pagination everywhere:** publishers, publisher placements, and screens all paginate/search upstream. Search inputs are debounced 300ms (`useDebounce`).
+- **Abort signals:** async fetch operations use `AbortController` to cancel in-flight requests on unmount.
+- **Report polling:** CSV generation polls `/report/status` every 2 seconds, up to 60 attempts, until `status_name === 'FINISHED_OK'`.
+- **Version check:** `useVersionCheck` compares `VITE_GIT_COMMIT` (baked in at Docker build from the Makefile) against the latest commit on `VITE_GIT_BRANCH` via the GitHub API every 5 minutes; Layout shows an update banner when outdated.
+- **Copy VAST Tag:** built client-side as `https://ad.360yield.com/{publisher_id}/advast?p={placement_id}&player_id=...&dooh_multiplier=1`; disabled when the screen has no `player_id`.
+- **Upstream API typo:** The SSP API returns `totalNumberOfElemements` (missing an 's'). `resolveTotal` in `handlers/` handles both spellings and falls back to the `X-360-Content-Range` header.
 - **Pagination defaults:** 20 items per page, max 100. Offset = `(page - 1) * limit`.
+- **Plans:** `plans/` holds dated implementation plans for past features — useful context for why things are shaped the way they are.
 
 ---
 

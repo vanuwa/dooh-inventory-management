@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import { StatusBadge } from './StatusBadge.jsx'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import PaginationControls from './PaginationControls.jsx'
+import CreateUserModal from './CreateUserModal.jsx'
 import { formatDateTime } from '../utils/dateUtils.js'
 
-export default function PublisherUsersTab({ publisherId }) {
+export default function PublisherUsersTab({ publisherId, publisherName }) {
   const [users, setUsers] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -17,8 +19,28 @@ export default function PublisherUsersTab({ publisherId }) {
   const committedSearch = useDebounce(search, 300)
   const [accessFilter, setAccessFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [successMessage, setSuccessMessage] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const createOpen = searchParams.get('create') === '1'
 
   useEffect(() => { setPage(1) }, [committedSearch, accessFilter, statusFilter])
+
+  function openCreate() {
+    setSuccessMessage('')
+    setSearchParams({ create: '1' }, { replace: true })
+  }
+
+  function closeCreate() {
+    setSearchParams({}, { replace: true })
+  }
+
+  function handleCreated(message) {
+    closeCreate()
+    setSuccessMessage(message)
+    setPage(1)
+    setRefreshKey(k => k + 1)
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -41,7 +63,7 @@ export default function PublisherUsersTab({ publisherId }) {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [publisherId, page, committedSearch, accessFilter, statusFilter])
+  }, [publisherId, page, committedSearch, accessFilter, statusFilter, refreshKey])
 
   const totalPages = Math.ceil(total / limit)
 
@@ -65,8 +87,10 @@ export default function PublisherUsersTab({ publisherId }) {
           <option value="true">Active</option>
           <option value="false">Inactive</option>
         </select>
+        <button style={s.createBtn} onClick={openCreate}>Create User</button>
       </div>
 
+      {successMessage && <p style={s.success}>{successMessage}</p>}
       {error && <p style={s.error}>{error}</p>}
       {loading && <p style={s.muted}>Loading…</p>}
 
@@ -109,12 +133,23 @@ export default function PublisherUsersTab({ publisherId }) {
           <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
+
+      {createOpen && (
+        <CreateUserModal
+          publisherId={publisherId}
+          publisherName={publisherName}
+          onClose={closeCreate}
+          onCreated={handleCreated}
+        />
+      )}
     </div>
   )
 }
 
 const s = {
   controls: { display: 'flex', gap: '0.75rem', marginBottom: '1rem' },
+  createBtn: { marginLeft: 'auto', padding: '0.4375rem 1rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
+  success: { color: '#15803d', fontSize: '0.875rem' },
   searchInput: { flex: 1, maxWidth: 280, padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', outline: 'none' },
   select: { padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', background: '#fff', cursor: 'pointer' },
   idTag: { color: '#6b7280', fontWeight: 400 },

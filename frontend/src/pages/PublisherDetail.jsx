@@ -234,7 +234,7 @@ export default function PublisherDetail() {
 
             {activeTab === 'bulk-upload-jobs' && <BulkUploadJobsTab publisherId={id} />}
 
-            {activeTab === 'users' && <PublisherUsersTab publisherId={id} />}
+            {activeTab === 'users' && <PublisherUsersTab publisherId={id} publisherName={publisher?.name} />}
 
             {activeTab === 'reporting' && (
               <ReportingTab
