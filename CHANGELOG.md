@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-06-11
+
+### Bug Fixes
+- Fixed "new version available" banner always showing when deployed from a non-main branch (e.g. `dev`); version check now compares against the branch the build was made from
+
 ## 2026-06-10
 
 ### Features
