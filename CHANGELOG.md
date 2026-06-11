@@ -2,6 +2,13 @@
 
 ## 2026-06-11
 
+### Features
+- Added Create User modal on the publisher Users tab: Console/API access types with role presets, searchable publisher multi-select; backend restricts creation to Publisher-type users
+- Added Edit User modal opened by clicking a user row (shareable `?user={id}` URL): editable profile, active/inactive status, publishers, and access levels; User Type and Access Type are read-only; backend restricts editing to Publisher-type users
+
+### Improvements
+- Replaced stale backend token-refresh tests with coverage matching the client-driven refresh flow
+
 ### Bug Fixes
 - Fixed "new version available" banner always showing when deployed from a non-main branch (e.g. `dev`); version check now compares against the branch the build was made from
 
