@@ -6,7 +6,9 @@ COPY frontend/ .
 RUN rm -f ./public/CHANGELOG.md
 COPY CHANGELOG.md ./public/CHANGELOG.md
 ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=main
 ENV VITE_GIT_COMMIT=$GIT_COMMIT
+ENV VITE_GIT_BRANCH=$GIT_BRANCH
 RUN npm run build
 
 FROM nginx:alpine

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 
 const CURRENT_COMMIT = import.meta.env.VITE_GIT_COMMIT
+const CURRENT_BRANCH = import.meta.env.VITE_GIT_BRANCH || 'main'
 const POLL_MS = 5 * 60 * 1000
 
 export function useVersionCheck() {
@@ -12,7 +13,7 @@ export function useVersionCheck() {
     async function check() {
       try {
         const res = await fetch(
-          'https://api.github.com/repos/vanuwa/dooh-inventory-management/commits/main',
+          `https://api.github.com/repos/vanuwa/dooh-inventory-management/commits/${CURRENT_BRANCH}`,
           { headers: { Accept: 'application/vnd.github.sha' } }
         )
         if (!res.ok) return
