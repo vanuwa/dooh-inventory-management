@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
@@ -11,6 +11,7 @@ import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import PaginationControls from '../components/PaginationControls.jsx'
+import CreatePlacementModal from '../components/CreatePlacementModal.jsx'
 
 const TABS = [
   { key: 'placements',       label: 'Placements' },
@@ -40,6 +41,10 @@ export default function PublisherDetail() {
   const [placementActiveFilter, setPlacementActiveFilter] = useState('')
   const [placementPage, setPlacementPage] = useState(1)
   const placementsLimit = 20
+  const [placementRefreshKey, setPlacementRefreshKey] = useState(0)
+  const [placementSuccessMessage, setPlacementSuccessMessage] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const createPlacementOpen = searchParams.get('create') === '1'
 
   useEffect(() => {
     apiFetch('/user/details')
@@ -94,7 +99,7 @@ export default function PublisherDetail() {
         setPlacementsLoading(false)
       })
     return () => controller.abort()
-  }, [id, activeTab, placementPage, committedSearch, placementActiveFilter])
+  }, [id, activeTab, placementPage, committedSearch, placementActiveFilter, placementRefreshKey])
 
   useEffect(() => {
     if (!publisher) return
@@ -106,7 +111,24 @@ export default function PublisherDetail() {
 
   const placementTotalPages = Math.ceil(placementTotal / placementsLimit)
 
+  function openCreatePlacement() {
+    setPlacementSuccessMessage('')
+    setSearchParams({ create: '1' }, { replace: true })
+  }
+
+  function closeCreatePlacement() {
+    setSearchParams({}, { replace: true })
+  }
+
+  function handlePlacementCreated(message) {
+    closeCreatePlacement()
+    setPlacementSuccessMessage(message)
+    setPlacementPage(1)
+    setPlacementRefreshKey(k => k + 1)
+  }
+
   function handleTabClick(tab) {
+    setPlacementSuccessMessage('')
     navigate(`/publishers/${id}/${tab}`)
   }
 
@@ -171,6 +193,7 @@ export default function PublisherDetail() {
               <>
                 {placementsLoading && <p style={s.muted}>Loading…</p>}
                 {placementsError && <p style={s.error}>{placementsError}</p>}
+                {placementSuccessMessage && <p style={s.success}>{placementSuccessMessage}</p>}
                 <div style={s.controls}>
                   <input
                     style={s.searchInput}
@@ -188,6 +211,7 @@ export default function PublisherDetail() {
                     <option value="true">Active only</option>
                     <option value="false">Inactive only</option>
                   </select>
+                  <button style={s.createBtn} onClick={openCreatePlacement}>Create DOOH Placement</button>
                 </div>
 
                 {!placementsLoading && placements.length === 0
@@ -229,6 +253,14 @@ export default function PublisherDetail() {
                     </>
                   )
                 }
+
+                {createPlacementOpen && (
+                  <CreatePlacementModal
+                    publisherId={id}
+                    onClose={closeCreatePlacement}
+                    onCreated={handlePlacementCreated}
+                  />
+                )}
               </>
             )}
 
@@ -266,6 +298,8 @@ const s = {
   controls: { display: 'flex', gap: '0.75rem', marginBottom: '1rem' },
   searchInput: { flex: 1, maxWidth: 280, padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', outline: 'none' },
   select: { padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', background: '#fff', cursor: 'pointer' },
+  createBtn: { marginLeft: 'auto', padding: '0.4375rem 1rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
+  success: { color: '#15803d', fontSize: '0.875rem' },
 
   idTag: { color: '#6b7280', fontWeight: 400 },
 

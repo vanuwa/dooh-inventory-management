@@ -256,6 +256,7 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 	params := url.Values{}
 	params.Set("limit", strconv.Itoa(limit))
 	params.Set("offset", strconv.Itoa(offset))
+	params.Set("sort", "-id")
 	if search := r.URL.Query().Get("search"); search != "" {
 		params.Set("search", search)
 	}
@@ -764,6 +765,154 @@ func (h *PublishersHandler) UpdatePublisherUser(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeProxyResponse(w, putStatus, respBody, putHeaders)
+}
+
+type createPlacementRequest struct {
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	MaxDefaults int    `json:"max_defaults"`
+}
+
+// CreatePublisherPlacement handles POST /api/publishers/{id}/placements.
+// It orchestrates three sequential upstream calls:
+//  1. Create inventory (site)
+//  2. Create zone under that inventory
+//  3. Create placement under that zone
+//
+// On failure at step 2 or 3, the already-created inventory is deleted as a
+// best-effort rollback before the error is returned.
+func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *http.Request) {
+	publisherID := r.PathValue("id")
+	accessToken := r.Header.Get("X-Access-Token")
+
+	var req createPlacementRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if req.MaxDefaults < 1 {
+		req.MaxDefaults = 1
+	}
+
+	// Step 1: Create inventory
+	invPayload := map[string]any{
+		"name":                 req.Name,
+		"expose_name":          true,
+		"country":              "International",
+		"inventory_status":     true,
+		"url":                  req.URL,
+		"expose_domain":        true,
+		"backup":               false,
+		"tiling":               false,
+		"coppa":                false,
+		"platform_id":          9,
+		"max_defaults":         req.MaxDefaults,
+		"enable_tag_variables": []string{},
+		"iab_categories":       []int{},
+	}
+	invBody, err := json.Marshal(invPayload)
+	if err != nil {
+		http.Error(w, "failed to build inventory payload", http.StatusInternalServerError)
+		return
+	}
+	invPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories", url.PathEscape(publisherID))
+	invResp, invStatus, invHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, invPath, accessToken, invBody, "application/json")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	if invStatus < 200 || invStatus >= 300 {
+		writeProxyResponse(w, invStatus, invResp, invHeaders)
+		return
+	}
+	var invResult struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(invResp, &invResult); err != nil || invResult.ID == 0 {
+		http.Error(w, "failed to parse inventory response", http.StatusInternalServerError)
+		return
+	}
+	inventoryID := invResult.ID
+	safePub := url.PathEscape(publisherID)
+
+	// zoneID is declared here so the cleanup closure captures it by reference;
+	// once step 2 succeeds and sets it, cleanup will delete the zone too.
+	var zoneID int64
+
+	cleanup := func() {
+		if zoneID != 0 {
+			delZone := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d", safePub, inventoryID, zoneID)
+			doRequest(h.cfg.ImproveAPIBaseURL, http.MethodDelete, delZone, accessToken, nil, "") //nolint:errcheck
+		}
+		delInv := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d", safePub, inventoryID)
+		doRequest(h.cfg.ImproveAPIBaseURL, http.MethodDelete, delInv, accessToken, nil, "") //nolint:errcheck
+	}
+
+	// Step 2: Create zone
+	zonePayload := map[string]any{"name": "DOOH", "zone_status": true}
+	zoneBody, err := json.Marshal(zonePayload)
+	if err != nil {
+		cleanup()
+		http.Error(w, "failed to build zone payload", http.StatusInternalServerError)
+		return
+	}
+	zonePath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones", safePub, inventoryID)
+	zoneResp, zoneStatus, zoneHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, zonePath, accessToken, zoneBody, "application/json")
+	if err != nil {
+		cleanup()
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	if zoneStatus < 200 || zoneStatus >= 300 {
+		cleanup()
+		writeProxyResponse(w, zoneStatus, zoneResp, zoneHeaders)
+		return
+	}
+	var zoneResult struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(zoneResp, &zoneResult); err != nil || zoneResult.ID == 0 {
+		cleanup()
+		http.Error(w, "failed to parse zone response", http.StatusInternalServerError)
+		return
+	}
+	zoneID = zoneResult.ID
+
+	// Step 3: Create placement
+	plPayload := map[string]any{
+		"name":               req.Name,
+		"placement_status":   true,
+		"placement_type":     "multiformat",
+		"appnexus":           true,
+		"pub_click_tracking": false,
+	}
+	plBody, err := json.Marshal(plPayload)
+	if err != nil {
+		cleanup()
+		http.Error(w, "failed to build placement payload", http.StatusInternalServerError)
+		return
+	}
+	plPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d/placements", safePub, inventoryID, zoneID)
+	plResp, plStatus, plHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, plPath, accessToken, plBody, "application/json")
+	if err != nil {
+		cleanup()
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	if plStatus < 200 || plStatus >= 300 {
+		cleanup()
+		writeProxyResponse(w, plStatus, plResp, plHeaders)
+		return
+	}
+	writeProxyResponse(w, plStatus, plResp, plHeaders)
 }
 
 func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
