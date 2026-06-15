@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-15
+
+### Features
+- Added Create DOOH Placement on the Publisher's Placements tab: "Create DOOH Placement" button opens a modal (Name, URL, Max Defaults; Creative Type fixed as Multiformat); backend orchestrates inventory → zone → placement creation in a single call with zone-aware rollback on failure
+- Placements grid now sorted by ID descending so newly created placements appear at the top
+
+### Bug Fixes
+- Fixed path traversal vulnerability: publisher ID is now URL-escaped before interpolation into upstream API paths in the placement creation handler
+- Fixed zone not being cleaned up when placement creation fails after the zone was already created
+- Fixed stale "Placement created successfully." message reappearing after switching tabs and returning to Placements
+
 ## 2026-06-11
 
 ### Features

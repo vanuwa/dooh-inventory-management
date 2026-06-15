@@ -1,6 +1,6 @@
 # DOOH Inventory Management Portal
 
-A read-only inventory browsing portal for Digital Out-of-Home (DOOH) ad inventory managed through an SSP platform.
+An inventory management portal for Digital Out-of-Home (DOOH) ad inventory managed through an SSP platform.
 
 ## What it does
 
@@ -22,8 +22,11 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
 
 - Login with SSP credentials (OAuth2 password grant)
 - Paginated, searchable publishers list with active/inactive filter
-- Publisher detail page showing metadata and all linked placements (filterable/searchable client-side)
-- Publisher detail page with a Bulk Upload Jobs tab — lists jobs, shows per-task breakdown and error messages in a detail modal, and lets you upload a new file
+- Publisher detail page with four tabs (URL-reflected):
+  - **Placements** — server-side paginated/searchable grid sorted by ID descending; create a new DOOH placement via modal (orchestrates inventory + zone + placement creation in the backend)
+  - **Bulk Upload Jobs** — lists jobs, shows per-task breakdown and error messages in a detail modal, upload a new file
+  - **Users** — list publisher users; create or edit a user (Console/API access types, role presets) via modal
+  - **Reporting** — generate and download a CSV performance report for the publisher
 - Placement detail page with two tabs (URL-reflected):
   - **Screens** — server-side paginated grid; click any row to open a view/edit modal with full screen details; download all screens as CSV
   - **Reporting** — generate and download a CSV performance report for the placement
@@ -122,7 +125,8 @@ make rebuild-ui    # rebuild only the frontend container
 | `GET` | `/api/user/details` | Authenticated user profile |
 | `GET` | `/api/publishers` | Paginated publishers list (`page`, `limit`, `search`, `active`) |
 | `GET` | `/api/publishers/{id}` | Single publisher detail |
-| `GET` | `/api/publishers/{id}/placements` | All placements for a publisher |
+| `GET` | `/api/publishers/{id}/placements` | Paginated placements for a publisher (sorted `-id`) |
+| `POST` | `/api/publishers/{id}/placements` | Create a DOOH placement (orchestrates inventory + zone + placement upstream) |
 | `GET` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Paginated screens for a placement (`page`, `limit`, `search`, `sort`) |
 | `POST` | `/api/report/placement/{publisherId}/{placementId}` | Synchronous report preview (up to 500 rows) |
 | `POST` | `/api/report/generate/placement/{publisherId}/{placementId}` | Start async CSV report generation |
@@ -130,4 +134,11 @@ make rebuild-ui    # rebuild only the frontend container
 | `GET` | `/api/publishers/{publisherId}/bulk-upload-jobs` | List bulk upload jobs for a publisher |
 | `POST` | `/api/publishers/{publisherId}/bulk-upload-jobs` | Upload a new bulk job file (multipart, max 50 MB) |
 
-All proxy endpoints are read-only (non-GET requests are rejected with 405) except auth, report generation, and bulk upload. Token refresh is handled client-side via `X-New-Access-Token` / `X-New-Refresh-Token` response headers.
+| `GET` | `/api/publishers/{id}/users` | List users for a publisher |
+| `POST` | `/api/publishers/{id}/users` | Create a publisher user |
+| `GET` | `/api/publishers/{id}/users/{userId}` | Get publisher user details |
+| `PUT` | `/api/publishers/{id}/users/{userId}` | Update a publisher user |
+| `POST` | `/api/report/publisher/{publisherId}` | Synchronous publisher report preview |
+| `POST` | `/api/report/generate/publisher/{publisherId}` | Start async publisher CSV report generation |
+
+Write-capable endpoints (all others are read-only, non-GET returns 405): auth, placement creation, user create/update, DOOH settings edit, report generation, and bulk upload. Token refresh is handled client-side; a 401 triggers a refresh + retry before logging out.
