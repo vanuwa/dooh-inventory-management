@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-06-22
+
+### Features
+- Added DOOH Metadata page (`/dooh-metadata`) with a 19-column scrollable grid of all screens from the upstream admin API; accessible from the top nav between Publishers and Changelog
+- Filters by country code and publisher ID (debounced); filter state, page, and page size reflected in the URL for shareable links
+- Configurable page size (10–10 000) persisted in localStorage; First/Prev/Next pagination using a limit+1 sentinel to avoid false "next page" prompts on exact-multiple-of-limit datasets
+- Screen image preview modal: clicking "View" in the Screen Image column shows the image in an overlay instead of opening a new tab
+
+### Bug Fixes
+- Fixed non-200 upstream responses being forwarded with an empty body (frontend now receives the actual error body)
+- Fixed `publisherId` filter accepting non-integer values that would cause upstream errors
+- Fixed NaN page state when the URL contains a malformed `?page=` parameter
+- Fixed page reset incorrectly firing on mount in React StrictMode when navigating to a shared URL with `?page=N`
+
 ## 2026-06-15
 
 ### Features
