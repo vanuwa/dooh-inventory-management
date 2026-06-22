@@ -23,6 +23,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	publishersHandler := handlers.NewPublishersHandler(cfg)
 	reportHandler := handlers.NewReportHandler(cfg)
 	bulkUploadJobsHandler := handlers.NewBulkUploadJobsHandler(cfg)
+	doohMetadataHandler := handlers.NewDoohMetadataHandler(cfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -46,6 +47,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /api/report/generate/publisher/{publisherId}", reportHandler.GeneratePublisherReport)
 	mux.HandleFunc("GET /api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.ListJobs)
 	mux.HandleFunc("POST /api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.CreateJob)
+	mux.HandleFunc("GET /api/dooh-metadata", doohMetadataHandler.DoohMetadata)
 
 	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
 }

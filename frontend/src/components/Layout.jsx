@@ -36,6 +36,7 @@ export default function Layout({ user, children }) {
           <nav style={s.nav}>
             <Link to="/recent" style={s.navLink}>Recent</Link>
             <Link to="/publishers" style={s.navLink}>Publishers</Link>
+            <Link to="/dooh-metadata" style={s.navLink}>DOOH Metadata</Link>
             <Link to="/changelog" style={s.navLink}>Changelog</Link>
           </nav>
         </div>

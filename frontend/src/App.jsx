@@ -8,6 +8,7 @@ import PublisherDetail from './pages/PublisherDetail.jsx'
 import PlacementDetail from './pages/PlacementDetail.jsx'
 import RecentActivity from './pages/RecentActivity.jsx'
 import Changelog from './pages/Changelog.jsx'
+import DoohMetadata from './pages/DoohMetadata.jsx'
 
 export default function App() {
   return (
@@ -100,6 +101,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <PlacementDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dooh-metadata"
+            element={
+              <ProtectedRoute>
+                <DoohMetadata />
               </ProtectedRoute>
             }
           />
