@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-06-23
+
+### Features
+- Added placement info card on the Placement detail page: shows placement ID, type, site (name + ID), platform, site URL, and max defaults above the tabs; visible on both direct URL access and publisher-page navigation
+- New `GET /api/publishers/{id}/placements/{placementId}` backend endpoint that facades two upstream calls — v2 placements search (returns inventory and platform fields) followed by inventory detail (returns site URL and max defaults)
+
+### Bug Fixes
+- Fixed placement detail page showing no card data on direct URL access (was calling a non-existent upstream endpoint that returned 403)
+
 ## 2026-06-22
 
 ### Features
