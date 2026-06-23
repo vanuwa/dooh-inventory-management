@@ -32,6 +32,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /api/publishers", publishersHandler.Publishers)
 	mux.HandleFunc("GET /api/publishers/{id}", publishersHandler.Publisher)
 	mux.HandleFunc("GET /api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
+	mux.HandleFunc("GET /api/publishers/{id}/placements/{placementId}", publishersHandler.GetPublisherPlacement)
 	mux.HandleFunc("POST /api/publishers/{id}/placements", publishersHandler.CreatePublisherPlacement)
 	mux.HandleFunc("GET /api/publishers/{id}/users", publishersHandler.PublisherUsers)
 	mux.HandleFunc("POST /api/publishers/{id}/users", publishersHandler.CreatePublisherUser)

@@ -53,6 +53,17 @@ type publisherPlacementsWrapper struct {
 	TotalNumberOfElemements int64                `json:"totalNumberOfElemements"`
 }
 
+type PlacementDetailResponse struct {
+	PublisherPlacement
+	InventoryURL string `json:"inventory_url,omitempty"`
+	MaxDefaults  int32  `json:"max_defaults,omitempty"`
+}
+
+type inventoryDetailUpstream struct {
+	URL         string `json:"url"`
+	MaxDefaults int32  `json:"max_defaults"`
+}
+
 type publisherPlacementsResponse struct {
 	Placements []PublisherPlacement `json:"placements"`
 	Total      int64                `json:"total"`
@@ -291,6 +302,68 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 		Page:       page,
 		Limit:      limit,
 	})
+}
+
+func (h *PublishersHandler) GetPublisherPlacement(w http.ResponseWriter, r *http.Request) {
+	publisherID := r.PathValue("id")
+	placementID := r.PathValue("placementId")
+	accessToken := r.Header.Get("X-Access-Token")
+
+	// Call 1: search the v2 placements list by placement ID — returns full placement data
+	// including inventory_name, inventory_id, inventory_platform_type_name.
+	params := url.Values{}
+	params.Set("search", placementID)
+	params.Set("limit", "100")
+	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements?%s",
+		url.PathEscape(publisherID), params.Encode())
+
+	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+		return
+	}
+
+	var wrapper publisherPlacementsWrapper
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		http.Error(w, "failed to parse placements response", http.StatusInternalServerError)
+		return
+	}
+
+	// Find exact match by ID (search may return partial name matches).
+	var found *PublisherPlacement
+	for i := range wrapper.Placements {
+		if fmt.Sprintf("%d", wrapper.Placements[i].ID) == placementID {
+			found = &wrapper.Placements[i]
+			break
+		}
+	}
+	if found == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	resp := PlacementDetailResponse{PublisherPlacement: *found}
+
+	// Call 2: fetch inventory for url + max_defaults. Soft failure — return placement
+	// data even if the inventory call fails.
+	if found.InventoryID != 0 {
+		invPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d",
+			url.PathEscape(publisherID), found.InventoryID)
+		invBody, invStatus, _, invErr := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, invPath, accessToken, nil, "")
+		if invErr == nil && invStatus == http.StatusOK {
+			var inv inventoryDetailUpstream
+			if json.Unmarshal(invBody, &inv) == nil {
+				resp.InventoryURL = inv.URL
+				resp.MaxDefaults = inv.MaxDefaults
+			}
+		}
+	}
+
+	writeJSON(w, resp)
 }
 
 func (h *PublishersHandler) GetPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {

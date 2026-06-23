@@ -3,6 +3,7 @@ import { useParams, useLocation, useNavigate, Link, useSearchParams } from 'reac
 import { apiFetch } from '../api.js'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
+import { StatusBadge } from '../components/StatusBadge.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import PaginationControls from '../components/PaginationControls.jsx'
 import { tabStyles } from '../styles/tabs.js'
@@ -59,15 +60,15 @@ export default function PlacementDetail() {
   const { publisherId, placementId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const locationPlacementName = location.state?.placement?.name ?? null
   const activeTab = location.pathname.endsWith('/reporting') ? 'reporting' : 'screens'
 
   const { recordVisit } = useRecentActivity()
 
   const [user, setUser] = useState(null)
   const [publisherName, setPublisherName] = useState(location.state?.publisherName ?? '')
-  const [fetchedPlacementName, setFetchedPlacementName] = useState(null)
-  const placementName = locationPlacementName ?? fetchedPlacementName ?? `Placement ${placementId}`
+  const [fetchedPlacement, setFetchedPlacement] = useState(null)
+  const placement = fetchedPlacement ?? location.state?.placement ?? null
+  const placementName = placement?.name ?? `Placement ${placementId}`
 
   // screens tab
   const [doohSettings, setDoohSettings] = useState([])
@@ -103,8 +104,7 @@ export default function PlacementDetail() {
 
   useEffect(() => {
     if (!publisherName) return
-    const resolvedPlacementName = locationPlacementName ?? fetchedPlacementName
-    if (!resolvedPlacementName) return
+    if (!placement?.name) return
     const url = activeTab === 'reporting'
       ? `/publishers/${publisherId}/placements/${placementId}/reporting`
       : `/publishers/${publisherId}/placements/${placementId}`
@@ -112,9 +112,9 @@ export default function PlacementDetail() {
       url,
       pageType: activeTab,
       publisher: { name: publisherName, id: publisherId },
-      placement: { name: resolvedPlacementName, id: placementId },
+      placement: { name: placement.name, id: placementId },
     })
-  }, [publisherName, activeTab, fetchedPlacementName])
+  }, [publisherName, activeTab, placement?.name])
 
   useEffect(() => {
     if (publisherName) return
@@ -125,14 +125,10 @@ export default function PlacementDetail() {
   }, [publisherId])
 
   useEffect(() => {
-    if (locationPlacementName) return
     const controller = new AbortController()
-    apiFetch(`/publishers/${publisherId}/placements?limit=100`, { signal: controller.signal })
+    apiFetch(`/publishers/${publisherId}/placements/${placementId}`, { signal: controller.signal })
       .then(r => r.json())
-      .then(data => {
-        const pl = (data.placements ?? []).find(p => String(p.id) === String(placementId))
-        if (pl?.name) setFetchedPlacementName(pl.name)
-      })
+      .then(pl => { if (pl?.id) setFetchedPlacement(pl) })
       .catch(() => {})
     return () => controller.abort()
   }, [publisherId, placementId])
@@ -297,12 +293,56 @@ export default function PlacementDetail() {
 
         <div style={s.heading}>
           <h2 style={s.title}>{placementName}</h2>
-          <span style={s.subtitle}>Screens (DOOH Settings)</span>
         </div>
 
+        {placement && (
+          <div style={s.card}>
+            <div style={s.cardHeader}>
+              <span style={s.cardId}>ID: {placement.id}</span>
+            </div>
+            <div style={s.cardBody}>
+              <div style={s.cardRow}>
+                <span style={s.cardLabel}>Type</span>
+                <span style={s.cardValue}>{placement.placement_type || '—'}</span>
+              </div>
+              <div style={s.cardRow}>
+                <span style={s.cardLabel}>Site</span>
+                <span style={s.cardValue}>
+                  {placement.inventory_name
+                    ? `${placement.inventory_name} (${placement.inventory_id})`
+                    : '—'}
+                </span>
+              </div>
+              <div style={s.cardRow}>
+                <span style={s.cardLabel}>Platform</span>
+                <span style={s.cardValue}>{placement.inventory_platform_type_name || '—'}</span>
+              </div>
+              {placement.inventory_url && (
+                <div style={s.cardRow}>
+                  <span style={s.cardLabel}>Site URL</span>
+                  <a href={/^https?:\/\//.test(placement.inventory_url) ? placement.inventory_url : `https://${placement.inventory_url}`} target="_blank" rel="noopener noreferrer"
+                     style={{ color: '#4338ca', fontSize: '0.9rem' }}>
+                    {placement.inventory_url}
+                  </a>
+                </div>
+              )}
+              {!!placement.max_defaults && (
+                <div style={s.cardRow}>
+                  <span style={s.cardLabel}>Max Defaults</span>
+                  <span style={s.cardValue}>{placement.max_defaults}</span>
+                </div>
+              )}
+              <div style={s.cardRow}>
+                <span style={s.cardLabel}>Status</span>
+                <StatusBadge active={placement.placement_status} />
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={tabStyles.tabBar}>
-          <button style={activeTab === 'screens' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/screens`, { state: { publisherName, placement: { name: placementName } } })}>Screens</button>
-          <button style={activeTab === 'reporting' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/reporting`, { state: { publisherName, placement: { name: placementName } } })}>Reporting</button>
+          <button style={activeTab === 'screens' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/screens`, { state: { publisherName, placement } })}>Screens</button>
+          <button style={activeTab === 'reporting' ? tabStyles.tabActive : tabStyles.tab} onClick={() => navigate(`/publishers/${publisherId}/placements/${placementId}/reporting`, { state: { publisherName, placement } })}>Reporting</button>
         </div>
 
         {activeTab === 'screens' && (
@@ -487,9 +527,16 @@ const s = {
   main: { padding: '2.5rem 1.5rem', maxWidth: '100%', margin: '0 auto' },
   backLink: { display: 'inline-block', marginBottom: '1rem', color: '#4338ca', fontSize: '0.875rem', textDecoration: 'none', fontWeight: 500 },
 
-  heading: { marginBottom: '1.5rem' },
-  title: { margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: 700, color: '#111827' },
-  subtitle: { fontSize: '0.875rem', color: '#6b7280' },
+  heading: { marginBottom: '1rem' },
+  title: { margin: '0', fontSize: '1.25rem', fontWeight: 700, color: '#111827' },
+
+  card: { background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)', overflow: 'hidden', marginBottom: '1.5rem' },
+  cardHeader: { display: 'flex', alignItems: 'baseline', gap: '0.625rem', padding: '0.75rem 1.375rem', borderBottom: '1px solid #f3f4f6' },
+  cardId: { fontSize: '0.875rem', color: '#6b7280', fontWeight: 400 },
+  cardBody: { padding: '0.25rem 0' },
+  cardRow: { display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.625rem 1.375rem', borderBottom: '1px solid #f9fafb' },
+  cardLabel: { fontSize: '0.8125rem', color: '#6b7280', fontWeight: 500, minWidth: 120 },
+  cardValue: { fontSize: '0.9rem', color: '#111827' },
 
   controls: { display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' },
   searchInput: {
