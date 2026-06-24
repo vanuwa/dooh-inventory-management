@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-06-24
+
+### Features
+- Added Edit button on the placement detail page: opens a pre-filled modal to update placement name, site URL, and max defaults; button is disabled until the full placement detail is loaded to prevent silent data-loss on max defaults
+- New `PUT /api/publishers/{id}/placements/{placementId}` backend endpoint that orchestrates a GET-merge-PUT for both the upstream inventory (name + URL + max defaults) and placement (name) to avoid wiping unrelated fields; changing the name updates both resources in sync
+
 ## 2026-06-23
 
 ### Features
