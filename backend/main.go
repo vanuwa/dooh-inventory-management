@@ -34,6 +34,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /api/publishers/{id}/placements", publishersHandler.PublisherPlacements)
 	mux.HandleFunc("GET /api/publishers/{id}/placements/{placementId}", publishersHandler.GetPublisherPlacement)
 	mux.HandleFunc("POST /api/publishers/{id}/placements", publishersHandler.CreatePublisherPlacement)
+	mux.HandleFunc("PUT /api/publishers/{id}/placements/{placementId}", publishersHandler.UpdatePublisherPlacement)
 	mux.HandleFunc("GET /api/publishers/{id}/users", publishersHandler.PublisherUsers)
 	mux.HandleFunc("POST /api/publishers/{id}/users", publishersHandler.CreatePublisherUser)
 	mux.HandleFunc("GET /api/publishers/{id}/users/{userId}", publishersHandler.GetPublisherUser)
@@ -87,6 +88,13 @@ func writeAllowed(path string) bool {
 		}
 	}
 	if strings.HasPrefix(path, "/api/publishers/") {
+		// PUT /api/publishers/{id}/placements/{placementId} — no further segments after the ID.
+		if i := strings.Index(path, "/placements/"); i != -1 {
+			rest := path[i+len("/placements/"):]
+			if len(rest) > 0 && !strings.Contains(rest, "/") {
+				return true
+			}
+		}
 		return strings.HasSuffix(path, "/bulk-upload-jobs") ||
 			strings.HasSuffix(path, "/dooh-settings") ||
 			strings.HasSuffix(path, "/users") ||

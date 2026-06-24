@@ -988,6 +988,134 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 	writeProxyResponse(w, plStatus, plResp, plHeaders)
 }
 
+type updatePlacementRequest struct {
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	MaxDefaults int    `json:"max_defaults"`
+}
+
+func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *http.Request) {
+	publisherID := r.PathValue("id")
+	placementID := r.PathValue("placementId")
+	accessToken := r.Header.Get("X-Access-Token")
+
+	var req updatePlacementRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if strings.TrimSpace(req.URL) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	if req.MaxDefaults < 1 {
+		req.MaxDefaults = 1
+	}
+
+	// Fetch current placement to get inventory_id and zone_id.
+	params := url.Values{}
+	params.Set("search", placementID)
+	params.Set("limit", "100")
+	searchPath := fmt.Sprintf("/publisher/v2/publishers/%s/placements?%s",
+		url.PathEscape(publisherID), params.Encode())
+	searchBody, searchStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, searchPath, accessToken, nil, "")
+	if err != nil || searchStatus != http.StatusOK {
+		writeErrorJSON(w, http.StatusBadGateway, "failed to fetch placement")
+		return
+	}
+	var wrapper publisherPlacementsWrapper
+	if err := json.Unmarshal(searchBody, &wrapper); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to parse placement response")
+		return
+	}
+	var found *PublisherPlacement
+	for i := range wrapper.Placements {
+		if fmt.Sprintf("%d", wrapper.Placements[i].ID) == placementID {
+			found = &wrapper.Placements[i]
+			break
+		}
+	}
+	if found == nil {
+		writeErrorJSON(w, http.StatusNotFound, "placement not found")
+		return
+	}
+	if found.InventoryID == 0 {
+		writeErrorJSON(w, http.StatusInternalServerError, "placement has no associated inventory")
+		return
+	}
+	if found.ZoneID == 0 {
+		writeErrorJSON(w, http.StatusInternalServerError, "placement has no associated zone")
+		return
+	}
+
+	safePub := url.PathEscape(publisherID)
+	invPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d", safePub, found.InventoryID)
+
+	// Fetch the full current inventory so the PUT doesn't wipe fields we aren't changing.
+	invGetBody, invGetStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, invPath, accessToken, nil, "")
+	if err != nil || invGetStatus != http.StatusOK {
+		writeErrorJSON(w, http.StatusBadGateway, "failed to fetch inventory")
+		return
+	}
+	var invData map[string]any
+	if err := json.Unmarshal(invGetBody, &invData); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to parse inventory response")
+		return
+	}
+
+	// Merge our changes into the full inventory object.
+	invData["name"] = req.Name
+	invData["url"] = req.URL
+	invData["max_defaults"] = req.MaxDefaults
+
+	invPayload, err := json.Marshal(invData)
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to build inventory payload")
+		return
+	}
+	_, invStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, invPath, accessToken, invPayload, "application/json")
+	if err != nil || invStatus < 200 || invStatus >= 300 {
+		writeErrorJSON(w, http.StatusBadGateway, "failed to update inventory")
+		return
+	}
+
+	// Fetch the full current placement so the PUT doesn't wipe fields we aren't changing.
+	plPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d/placements/%s",
+		safePub, found.InventoryID, found.ZoneID, url.PathEscape(placementID))
+	plGetBody, plGetStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, plPath, accessToken, nil, "")
+	if err != nil || plGetStatus != http.StatusOK {
+		writeErrorJSON(w, http.StatusBadGateway, "failed to fetch placement detail")
+		return
+	}
+	var plData map[string]any
+	if err := json.Unmarshal(plGetBody, &plData); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to parse placement detail response")
+		return
+	}
+
+	plData["name"] = req.Name
+
+	plPayload, err := json.Marshal(plData)
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to build placement payload")
+		return
+	}
+	plResp, plStatus, plHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, plPath, accessToken, plPayload, "application/json")
+	if err != nil {
+		writeErrorJSON(w, http.StatusBadGateway, "upstream request failed")
+		return
+	}
+	if plStatus < 200 || plStatus >= 300 {
+		writeErrorJSON(w, http.StatusBadGateway, "failed to update placement name (site details were saved)")
+		return
+	}
+	writeProxyResponse(w, plStatus, plResp, plHeaders)
+}
+
 func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")

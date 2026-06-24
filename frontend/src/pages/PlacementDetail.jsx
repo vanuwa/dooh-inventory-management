@@ -5,6 +5,7 @@ import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
+import EditPlacementModal from '../components/EditPlacementModal.jsx'
 import PaginationControls from '../components/PaginationControls.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
@@ -82,6 +83,8 @@ export default function PlacementDetail() {
   const [screensCsvLoading, setScreensCsvLoading] = useState(false)
   const screensCsvInFlightRef = useRef(false)
   const [screensTick, setScreensTick] = useState(0)
+
+  const [editPlacementOpen, setEditPlacementOpen] = useState(false)
 
   // screen detail modal
   const [selectedScreen, setSelectedScreen] = useState(null)
@@ -299,6 +302,7 @@ export default function PlacementDetail() {
           <div style={s.card}>
             <div style={s.cardHeader}>
               <span style={s.cardId}>ID: {placement.id}</span>
+              <button style={{ ...s.editBtn, marginLeft: 'auto' }} onClick={() => setEditPlacementOpen(true)} disabled={!fetchedPlacement}>Edit</button>
             </div>
             <div style={s.cardBody}>
               <div style={s.cardRow}>
@@ -338,6 +342,19 @@ export default function PlacementDetail() {
               </div>
             </div>
           </div>
+        )}
+
+        {editPlacementOpen && placement && (
+          <EditPlacementModal
+            publisherId={publisherId}
+            placementId={placementId}
+            placement={placement}
+            onClose={() => setEditPlacementOpen(false)}
+            onSaved={updated => {
+              setFetchedPlacement(updated)
+              setEditPlacementOpen(false)
+            }}
+          />
         )}
 
         <div style={tabStyles.tabBar}>
