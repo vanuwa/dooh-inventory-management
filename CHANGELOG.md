@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-06-25
+
+### Features
+- Added "Today" quick alias to reporting date range selectors on placement and publisher pages; backend converts it to a fixed single-day range before forwarding to the upstream API
+- Custom date range pickers now allow selecting today's date (previously capped at yesterday)
+
+### Improvements
+- Weekly and monthly group-by options are automatically reset to daily and disabled when "Today" is selected, since a single-day range is incompatible with multi-day time dimensions
+- Date picker `max` constraint now uses the browser's local calendar date rather than UTC, preventing UTC+ users from being unable to select their local today
+
 ## 2026-06-24
 
 ### Features
