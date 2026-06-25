@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"dooh-backend/config"
 )
@@ -111,6 +112,23 @@ func buildDims(groupBy string, baseDims []string) (timeDim string, dims, colOrde
 	return
 }
 
+func normalizeReportDateRange(r reportDateRange) reportDateRange {
+	if r.Quick == "TODAY" {
+		today := time.Now().UTC().Format("2006-01-02")
+		return reportDateRange{Fixed: &reportFixed{StartDate: today, EndDate: today}}
+	}
+	return r
+}
+
+func decodeReportReq(r *http.Request) (placementReportReq, error) {
+	var req placementReportReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return req, err
+	}
+	req.DateRange = normalizeReportDateRange(req.DateRange)
+	return req, nil
+}
+
 func toGenDateRange(r reportDateRange) genDateRange {
 	dr := genDateRange{Quick: r.Quick}
 	if r.Fixed != nil {
@@ -123,8 +141,8 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 	placementId := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
 
-	var req placementReportReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeReportReq(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -163,8 +181,8 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 	placementId := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
 
-	var req placementReportReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeReportReq(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -206,8 +224,8 @@ func (h *ReportHandler) PublisherReport(w http.ResponseWriter, r *http.Request) 
 	}
 	accessToken := r.Header.Get("X-Access-Token")
 
-	var req placementReportReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeReportReq(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -251,8 +269,8 @@ func (h *ReportHandler) GeneratePublisherReport(w http.ResponseWriter, r *http.R
 	}
 	accessToken := r.Header.Get("X-Access-Token")
 
-	var req placementReportReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeReportReq(r)
+	if err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}

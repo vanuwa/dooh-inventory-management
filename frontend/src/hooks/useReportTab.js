@@ -110,6 +110,7 @@ export function useReportTab(previewUrl, generateUrl) {
     } else {
       setDateRangeType('quick')
       setQuickAlias(val)
+      if (val === 'TODAY') setGroupBy('day')
     }
   }
 

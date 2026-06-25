@@ -1,12 +1,6 @@
 import { useReportTab } from '../hooks/useReportTab.js'
 import { tableStyles } from '../styles/tables.js'
 
-const yesterdayStr = (() => {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().split('T')[0]
-})()
-
 export default function ReportingTab({ previewUrl, generateUrl }) {
   const {
     quickAlias, dateRangeType, customStart, customEnd, groupBy,
@@ -15,6 +9,9 @@ export default function ReportingTab({ previewUrl, generateUrl }) {
     csvLoading, csvError,
     fetchReport, downloadCSV, handleQuickChange,
   } = useReportTab(previewUrl, generateUrl)
+
+  const todayStr = new Date().toLocaleDateString('en-CA')
+  const isSingleDay = dateRangeType === 'quick' && quickAlias === 'TODAY'
 
   return (
     <>
@@ -26,6 +23,7 @@ export default function ReportingTab({ previewUrl, generateUrl }) {
           onChange={handleQuickChange}
           style={s.dateSelect}
         >
+          <option value="TODAY">Today</option>
           <option value="YESTERDAY">Yesterday</option>
           <option value="LAST_7_DAYS">Last 7 Days</option>
           <option value="LAST_14_DAYS">Last 14 Days</option>
@@ -46,14 +44,14 @@ export default function ReportingTab({ previewUrl, generateUrl }) {
             <input
               type="date"
               value={customStart}
-              max={yesterdayStr}
+              max={todayStr}
               onChange={e => setCustomStart(e.target.value)}
               style={s.dateSelect}
             />
             <input
               type="date"
               value={customEnd}
-              max={yesterdayStr}
+              max={todayStr}
               onChange={e => setCustomEnd(e.target.value)}
               style={s.dateSelect}
             />
@@ -61,24 +59,28 @@ export default function ReportingTab({ previewUrl, generateUrl }) {
         )}
 
         <div style={s.groupByToggle}>
-          {[['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']].map(([v, label], idx, arr) => (
-            <button
-              key={v}
-              style={{
-                padding: '0.4375rem 0.75rem',
-                background: groupBy === v ? '#1a1a2e' : '#fff',
-                color: groupBy === v ? '#fff' : '#374151',
-                border: 'none',
-                borderRight: idx < arr.length - 1 ? '1px solid #d1d5db' : 'none',
-                cursor: 'pointer',
-                fontSize: '0.8125rem',
-                fontWeight: groupBy === v ? 500 : 400,
-              }}
-              onClick={() => setGroupBy(v)}
-            >
-              {label}
-            </button>
-          ))}
+          {[['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']].map(([v, label], idx, arr) => {
+            const isDisabled = isSingleDay && v !== 'day'
+            return (
+              <button
+                key={v}
+                disabled={isDisabled}
+                style={{
+                  padding: '0.4375rem 0.75rem',
+                  background: groupBy === v ? '#1a1a2e' : '#fff',
+                  color: isDisabled ? '#9ca3af' : (groupBy === v ? '#fff' : '#374151'),
+                  border: 'none',
+                  borderRight: idx < arr.length - 1 ? '1px solid #d1d5db' : 'none',
+                  cursor: isDisabled ? 'default' : 'pointer',
+                  fontSize: '0.8125rem',
+                  fontWeight: groupBy === v ? 500 : 400,
+                }}
+                onClick={() => setGroupBy(v)}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
 
         <button style={s.loadBtn} onClick={fetchReport} disabled={reportLoading}>
