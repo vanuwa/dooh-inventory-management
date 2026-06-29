@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-06-29
+
+### Features
+- Added hourly grouping option to reporting tabs on placement and publisher pages; backend maps the `hour` group-by to the `date_hour` dimension when forwarding to the upstream API, producing per-hour rows with timestamps like `2026-06-27 15:00:00.0`
+- Group-by buttons are now ordered Hourly / Daily / Weekly / Monthly; hourly remains available (not disabled) when "Today" is selected, as it is the most useful granularity for a single-day range
+
 ## 2026-06-25
 
 ### Features
