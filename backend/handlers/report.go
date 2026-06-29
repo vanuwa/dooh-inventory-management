@@ -99,10 +99,16 @@ type reportGenBody struct {
 }
 
 func resolveGroupBy(s string) string {
-	if s == "week" || s == "month" {
-		return s
+	switch s {
+	case "week":
+		return "week"
+	case "month":
+		return "month"
+	case "hour":
+		return "date_hour"
+	default:
+		return "day"
 	}
-	return "day"
 }
 
 func buildDims(groupBy string, baseDims []string) (timeDim string, dims, colOrder []string) {

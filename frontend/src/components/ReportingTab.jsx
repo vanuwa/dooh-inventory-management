@@ -59,8 +59,8 @@ export default function ReportingTab({ previewUrl, generateUrl }) {
         )}
 
         <div style={s.groupByToggle}>
-          {[['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']].map(([v, label], idx, arr) => {
-            const isDisabled = isSingleDay && v !== 'day'
+          {[['hour', 'Hourly'], ['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']].map(([v, label], idx, arr) => {
+            const isDisabled = isSingleDay && (v === 'week' || v === 'month')
             return (
               <button
                 key={v}
