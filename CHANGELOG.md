@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-02
+
+### Features
+- Added "Create Screen" button to the Screens tab on the placement detail page; opens the existing screen modal in create mode with publisher ID and placement ID pre-filled (read-only), venue type taxonomy defaulting to "OpenOOH Venue Taxonomy 1.1", and allowed content defaulting to "VIDEO"
+- Required fields (Player ID, Resolution Width/Height, Venue Type ID, Venue Type Tax, Latitude, Longitude, Country Code, City, Allowed Content) are marked with an asterisk and highlighted with a red border if left empty on submission
+- `?` help tooltips on Venue Type ID (links to the OpenOOH taxonomy spec) and Country Code (ISO 3166-1 alpha-2 explanation)
+- New `POST /api/publishers/{publisherId}/placements/{placementId}/dooh-settings` backend endpoint proxying the upstream create API; upstream validation errors are passed through to the UI verbatim
+- On successful creation the screens grid refreshes automatically to show the new entry; the create URL (`?screen=new`) is shareable and reopens the form on load
+
 ## 2026-06-29
 
 ### Features
