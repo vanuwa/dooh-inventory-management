@@ -610,6 +610,64 @@ func TestPlacementDoohSettings_ContentRangeFallback(t *testing.T) {
 	}
 }
 
+func TestPostPlacementDoohSettings_Success(t *testing.T) {
+	const reqBody = `{"dooh_settings":[{"player_id":"TST-001","resolution_width":1920,"resolution_height":1080,"venue_type_id":302,"venue_type_tax":"OpenOOH Venue Taxonomy 1.1","lat":48.19,"lon":16.36,"country_code":"AT","city":"Vienna","allowed_content":"VIDEO"}]}`
+	const respBody = `{"dooh_settings":[{"id":999,"player_id":"TST-001","resolution_width":1920,"resolution_height":1080}]}`
+
+	var gotMethod string
+	var gotBody []byte
+	var gotToken string
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotToken = r.Header.Get("Authorization")
+			gotBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(respBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/publishers/42/placements/101/dooh-settings", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: want 201, got %d", resp.StatusCode)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("upstream method: want POST, got %s", gotMethod)
+	}
+	if gotToken != "Bearer mock-access-token" {
+		t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", gotToken)
+	}
+	if !bytes.Equal(gotBody, []byte(reqBody)) {
+		t.Errorf("body forwarded: want %s, got %s", reqBody, gotBody)
+	}
+
+	var body struct {
+		DoohSettings []map[string]any `json:"dooh_settings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.DoohSettings) != 1 {
+		t.Errorf("dooh_settings: want 1, got %d", len(body.DoohSettings))
+	}
+	if id := body.DoohSettings[0]["id"]; id != float64(999) {
+		t.Errorf("id: want 999, got %v", id)
+	}
+}
+
 // --- Publisher users ---
 
 const mockUsersListBody = `{"users":[{"id":101,"first_name":"Ivan","last_name":"Test","email":"ivan@test.com","user_type":"Publisher","user_access":"Console","active":true,"lastLoginTime":"2026-06-01T09:00:00Z"}],"totalNumberOfElemements":1}`

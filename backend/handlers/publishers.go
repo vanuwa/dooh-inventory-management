@@ -1116,8 +1116,8 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	writeProxyResponse(w, plStatus, plResp, plHeaders)
 }
 
-func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
-	placementID := r.PathValue("placementId")
+func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Request, method string) {
+	placementID := url.PathEscape(r.PathValue("placementId"))
 	accessToken := r.Header.Get("X-Access-Token")
 	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings", placementID)
 
@@ -1126,12 +1126,18 @@ func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *h
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
-	respBody, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, upstreamPath, accessToken, bodyBytes, "application/json")
+	respBody, status, respHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, method, upstreamPath, accessToken, bodyBytes, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(respBody)
+	writeProxyResponse(w, status, respBody, respHeaders)
+}
+
+func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+	h.proxyDoohSettings(w, r, http.MethodPut)
+}
+
+func (h *PublishersHandler) PostPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+	h.proxyDoohSettings(w, r, http.MethodPost)
 }

@@ -12,36 +12,51 @@ import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 
 const SCREEN_FIELDS = [
-  ['ID', 'id', false],
-  ['Publisher ID', 'publisher_id', false],
-  ['Placement ID', 'placement_id', false],
-  ['Player ID', 'player_id', true, 'text'],
-  ['Device ID', 'device_id', true, 'text'],
-  ['Screen Image URL', 'screen_img_url', true, 'text'],
-  ['Orientation', 'orientation', true, 'text'],
-  ['Resolution Width', 'resolution_width', true, 'number'],
-  ['Resolution Height', 'resolution_height', true, 'number'],
-  ['Venue Type ID', 'venue_type_id', true, 'number'],
-  ['Venue Type Tax', 'venue_type_tax', true, 'text'],
-  ['Latitude', 'lat', true, 'number'],
-  ['Longitude', 'lon', true, 'number'],
-  ['Country Code', 'country_code', true, 'text'],
-  ['Region', 'region', true, 'text'],
-  ['City', 'city', true, 'text'],
-  ['Zip', 'zip', true, 'text'],
-  ['Address', 'address', true, 'text'],
-  ['Width (cm)', 'width', true, 'number'],
-  ['Height (cm)', 'height', true, 'number'],
-  ['Min Duration (s)', 'min_duration', true, 'number'],
-  ['Max Duration (s)', 'max_duration', true, 'number'],
-  ['Avg Weekly Audience', 'avg_weekly_audience', true, 'number'],
-  ['CPM', 'cpm', true, 'number'],
-  ['Currency Code', 'currency_code', true, 'text'],
-  ['Allowed Content', 'allowed_content', true, 'text'],
+  ['ID',                  'id',                 false, undefined, false],
+  ['Publisher ID',        'publisher_id',        false, undefined, false],
+  ['Placement ID',        'placement_id',        false, undefined, false],
+  ['Player ID',           'player_id',           true,  'text',   true],
+  ['Device ID',           'device_id',           true,  'text',   false],
+  ['Screen Image URL',    'screen_img_url',      true,  'text',   false],
+  ['Orientation',         'orientation',         true,  'text',   false],
+  ['Resolution Width',    'resolution_width',    true,  'number', true],
+  ['Resolution Height',   'resolution_height',   true,  'number', true],
+  ['Venue Type ID',       'venue_type_id',       true,  'number', true,  'venueTypeId'],
+  ['Venue Type Tax',      'venue_type_tax',      true,  'text',   true],
+  ['Latitude',            'lat',                 true,  'number', true],
+  ['Longitude',           'lon',                 true,  'number', true],
+  ['Country Code',        'country_code',        true,  'text',   true,  'countryCode'],
+  ['Region',              'region',              true,  'text',   false],
+  ['City',                'city',                true,  'text',   true],
+  ['Zip',                 'zip',                 true,  'text',   false],
+  ['Address',             'address',             true,  'text',   false],
+  ['Width (cm)',          'width',               true,  'number', false],
+  ['Height (cm)',         'height',              true,  'number', false],
+  ['Min Duration (s)',    'min_duration',        true,  'number', false],
+  ['Max Duration (s)',    'max_duration',        true,  'number', false],
+  ['Avg Weekly Audience', 'avg_weekly_audience', true,  'number', false],
+  ['CPM',                 'cpm',                 true,  'number', false],
+  ['Currency Code',       'currency_code',       true,  'text',   false],
+  ['Allowed Content',     'allowed_content',     true,  'text',   true],
 ]
 
+const REQUIRED_FIELDS = new Set(
+  SCREEN_FIELDS.filter(([,,,, req]) => req).map(([, key]) => key)
+)
+
+const FIELD_HELP = {
+  venueTypeId: {
+    text: 'Type of out-of-home venue. The taxonomy to be used is defined by the venueTypeTax field.',
+    link: 'https://github.com/openooh/venue-taxonomy/blob/main/specification-1.1.md',
+    linkLabel: 'OpenOOH Venue Taxonomy 1.1',
+  },
+  countryCode: {
+    text: 'Country code using ISO 3166-1 alpha-2 standard (e.g., US, FR, CN).',
+  },
+}
+
 function coerceTypes(vals) {
-  const intFields = ['resolution_width', 'resolution_height', 'venue_type_id', 'width', 'height', 'min_duration', 'max_duration']
+  const intFields = ['publisher_id', 'placement_id', 'resolution_width', 'resolution_height', 'venue_type_id', 'width', 'height', 'min_duration', 'max_duration']
   const floatFields = ['lat', 'lon', 'avg_weekly_audience', 'cpm']
   const out = { ...vals }
   for (const f of intFields) {
@@ -93,9 +108,13 @@ export default function PlacementDetail() {
   const [editValues, setEditValues] = useState({})
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [createMode, setCreateMode] = useState(false)
+  const [validationErrors, setValidationErrors] = useState({})
+  const [helpOpen, setHelpOpen] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const [copiedVast, setCopiedVast] = useState(false)
   const autoOpenAttemptedRef = useRef(false)
+  const newScreenInitRef = useRef(false)
   const copiedVastTimerRef = useRef(null)
 
   useEffect(() => {
@@ -141,7 +160,26 @@ export default function PlacementDetail() {
   const initialScreenId = searchParams.get('screen')
 
   useEffect(() => {
-    if (autoOpenAttemptedRef.current || loading || !initialScreenId) return
+    if (!initialScreenId) {
+      newScreenInitRef.current = false
+      return
+    }
+    if (initialScreenId === 'new') {
+      if (!newScreenInitRef.current) {
+        newScreenInitRef.current = true
+        setCreateMode(true)
+        setEditValues({
+          publisher_id: publisherId,
+          placement_id: placementId,
+          venue_type_tax: 'OpenOOH Venue Taxonomy 1.1',
+          allowed_content: 'VIDEO',
+        })
+        setValidationErrors({})
+        setSaveError('')
+      }
+      return
+    }
+    if (autoOpenAttemptedRef.current || loading) return
     const found = doohSettings.find(sc => String(sc.id) === initialScreenId)
     if (found) {
       autoOpenAttemptedRef.current = true
@@ -156,7 +194,7 @@ export default function PlacementDetail() {
       })
       .then(data => { if (data?.dooh_setting) setSelectedScreen(data.dooh_setting) })
       .catch(() => { autoOpenAttemptedRef.current = false })
-  }, [loading, doohSettings, initialScreenId])
+  }, [loading, doohSettings, initialScreenId, publisherId, placementId])
 
   useEffect(() => {
     setCopiedVast(false)
@@ -239,6 +277,11 @@ export default function PlacementDetail() {
 
   function closeModal() {
     setSelectedScreen(null)
+    setCreateMode(false)
+    setEditValues({})
+    setValidationErrors({})
+    setHelpOpen(null)
+    setSaveError('')
     setSearchParams({}, { replace: true })
   }
 
@@ -257,8 +300,58 @@ export default function PlacementDetail() {
     setSaveError('')
   }
 
+  function validateFields(values) {
+    const errors = {}
+    for (const field of REQUIRED_FIELDS) {
+      const v = values[field]
+      if (v == null || v === '') errors[field] = true
+    }
+    return errors
+  }
+
+  async function handleCreate() {
+    if (saveLoading) return
+    const errors = validateFields(editValues)
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors)
+      setSaveError('Please fill in all required fields (marked with *).')
+      return
+    }
+    setValidationErrors({})
+    setSaveLoading(true)
+    setSaveError('')
+    const payload = coerceTypes(
+      Object.fromEntries(Object.entries(editValues).filter(([, v]) => v != null && v !== ''))
+    )
+    try {
+      const res = await apiFetch(
+        `/publishers/${publisherId}/placements/${placementId}/dooh-settings`,
+        { method: 'POST', body: JSON.stringify({ dooh_settings: [payload] }) }
+      )
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        const detail = Array.isArray(errData.errors) ? ` — ${errData.errors.join(', ')}` : ''
+        setSaveError((errData.message ?? `Create failed (${res.status})`) + detail)
+        return
+      }
+      setScreensTick(t => t + 1)
+      closeModal()
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setSaveError('Create failed.')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+
   async function handleSave() {
     if (saveLoading) return
+    const errors = validateFields(editValues)
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors)
+      setSaveError('Please fill in all required fields (marked with *).')
+      return
+    }
+    setValidationErrors({})
     setSaveLoading(true)
     setSaveError('')
     const updated = coerceTypes(editValues)
@@ -287,6 +380,9 @@ export default function PlacementDetail() {
       setSaveLoading(false)
     }
   }
+
+  const isFormActive = editMode || createMode
+  const displaySource = createMode ? editValues : selectedScreen
 
   return (
     <Layout user={user}>
@@ -374,6 +470,9 @@ export default function PlacementDetail() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
+              <button style={s.createBtn} onClick={() => setSearchParams({ screen: 'new' }, { replace: true })}>
+                + Create Screen
+              </button>
               <button style={s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading}>
                 {screensCsvLoading ? <><span style={s.spinnerSm} />Downloading…</> : 'Download CSV'}
               </button>
@@ -469,12 +568,12 @@ export default function PlacementDetail() {
           </>
         )}
 
-        {selectedScreen && (
+        {(selectedScreen || createMode) && (
           <div style={s.overlay} onClick={closeModal}>
             <div style={s.modal} onClick={e => e.stopPropagation()}>
               <div style={s.modalHeader}>
-                <h3 style={s.modalTitle}>Screen #{selectedScreen.id}</h3>
-                {!editMode && (
+                <h3 style={s.modalTitle}>{createMode ? 'Create Screen' : `Screen #${selectedScreen?.id}`}</h3>
+                {!editMode && !createMode && (
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <button style={s.vastTagBtn} onClick={handleCopyVastTag} disabled={!selectedScreen.player_id}>
                       {copiedVast ? 'Copied!' : 'Copy VAST Tag'}
@@ -487,33 +586,64 @@ export default function PlacementDetail() {
               <div style={s.modalBodyScroll}>
                 <table style={s.modalTable}>
                   <tbody>
-                    {SCREEN_FIELDS.map(([label, field, editable, inputType]) => (
-                      <tr key={field} style={s.modalRow}>
-                        <td style={s.modalLabel}>{label}</td>
-                        <td style={s.modalValue}>
-                          {editMode && editable
-                            ? <input
-                                type={inputType}
-                                value={editValues[field] ?? ''}
-                                onChange={e => setEditValues(prev => ({ ...prev, [field]: e.target.value }))}
-                                style={s.editInput}
-                                step={inputType === 'number' ? 'any' : undefined}
-                              />
-                            : (selectedScreen[field] != null && selectedScreen[field] !== '' ? String(selectedScreen[field]) : '—')
-                          }
-                        </td>
-                      </tr>
+                    {SCREEN_FIELDS.map(([label, field, editable, inputType, required, helpKey]) => (
+                        <tr key={field} style={s.modalRow}>
+                          <td style={s.modalLabel}>
+                            {label}
+                            {required && isFormActive && <span style={{ color: '#e53e3e', marginLeft: 2 }}>*</span>}
+                            {helpKey && (
+                              <span style={{ position: 'relative', display: 'inline-block', marginLeft: 4 }}>
+                                <button
+                                  style={s.helpIcon}
+                                  onClick={e => { e.stopPropagation(); setHelpOpen(helpOpen === helpKey ? null : helpKey) }}
+                                >?</button>
+                                {helpOpen === helpKey && (
+                                  <div style={s.helpPopover}>
+                                    <p style={{ margin: 0 }}>{FIELD_HELP[helpKey].text}</p>
+                                    {FIELD_HELP[helpKey].link && (
+                                      <a href={FIELD_HELP[helpKey].link} target="_blank" rel="noreferrer" style={{ fontSize: '0.8em', display: 'block', marginTop: 6 }}>
+                                        {FIELD_HELP[helpKey].linkLabel ?? 'Learn more'}
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </span>
+                            )}
+                          </td>
+                          <td style={s.modalValue}>
+                            {isFormActive && editable
+                              ? <input
+                                  type={inputType}
+                                  value={editValues[field] ?? ''}
+                                  onChange={e => {
+                                    setEditValues(prev => ({ ...prev, [field]: e.target.value }))
+                                    if (validationErrors[field]) setValidationErrors(prev => { const n = { ...prev }; delete n[field]; return n })
+                                  }}
+                                  style={validationErrors[field] ? s_editInputError : s.editInput}
+                                  step={inputType === 'number' ? 'any' : undefined}
+                                />
+                              : (displaySource?.[field] != null && displaySource?.[field] !== '' ? String(displaySource[field]) : '—')
+                            }
+                          </td>
+                        </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              {editMode && saveError && <p style={s.saveError}>{saveError}</p>}
+              {(editMode || createMode) && saveError && <p style={s.saveError}>{saveError}</p>}
 
               <div style={s.modalFooter}>
-                {editMode ? (
+                {createMode ? (
                   <>
-                    <button style={s.cancelBtn} onClick={() => { setEditMode(false); setSaveError('') }}>Cancel</button>
+                    <button style={s.cancelBtn} onClick={closeModal}>Cancel</button>
+                    <button style={s.primaryBtn} onClick={handleCreate} disabled={saveLoading}>
+                      {saveLoading ? 'Creating…' : 'Create'}
+                    </button>
+                  </>
+                ) : editMode ? (
+                  <>
+                    <button style={s.cancelBtn} onClick={() => { setEditMode(false); setSaveError(''); setValidationErrors({}) }}>Cancel</button>
                     <button style={s.primaryBtn} onClick={handleSave} disabled={saveLoading}>
                       {saveLoading ? 'Saving…' : 'Save'}
                     </button>
@@ -566,6 +696,7 @@ const s = {
     color: '#111827',
     outline: 'none',
   },
+  createBtn: { padding: '0.4375rem 1rem', background: '#2f855a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   csvBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' },
   refreshBtn: { padding: '0.375rem 0.75rem', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem', marginLeft: 'auto' },
   spinnerSm: { display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(26,26,46,0.2)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 },
@@ -591,4 +722,8 @@ const s = {
   primaryBtn: { padding: '0.4375rem 1.25rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   cancelBtn: { padding: '0.4375rem 1.25rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem' },
   saveError: { color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.5rem', flexShrink: 0 },
+  helpIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', border: '1px solid #aaa', fontSize: 10, cursor: 'pointer', background: '#f0f2f5', padding: 0, verticalAlign: 'middle', lineHeight: 1 },
+  helpPopover: { position: 'absolute', zIndex: 100, background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '8px 10px', width: 260, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', top: 22, left: 0, fontSize: '0.8125rem', lineHeight: 1.4 },
 }
+
+const s_editInputError = { ...s.editInput, borderColor: '#e53e3e', outline: '1px solid #e53e3e' }

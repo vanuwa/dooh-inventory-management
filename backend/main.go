@@ -42,6 +42,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /api/publishers/{publisherId}/placements/{placementId}/dooh-settings/{screenId}", publishersHandler.GetPlacementDoohSettingItem)
 	mux.HandleFunc("GET /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.GetPlacementDoohSettings)
 	mux.HandleFunc("PUT /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PutPlacementDoohSettings)
+	mux.HandleFunc("POST /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PostPlacementDoohSettings)
 	mux.HandleFunc("POST /api/report/placement/{publisherId}/{placementId}", reportHandler.PlacementReport)
 	mux.HandleFunc("POST /api/report/generate/placement/{publisherId}/{placementId}", reportHandler.GeneratePlacementReport)
 	mux.HandleFunc("GET /api/report/status/{reportGenerationId}", reportHandler.PlacementReportStatus)
