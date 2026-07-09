@@ -6,6 +6,7 @@ export default function CreatePlacementModal({ publisherId, onClose, onCreated }
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [maxDefaults, setMaxDefaults] = useState(1)
+  const [appnexus, setAppnexus] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
@@ -29,11 +30,14 @@ export default function CreatePlacementModal({ publisherId, onClose, onCreated }
     try {
       const res = await apiFetch(`/publishers/${publisherId}/placements`, {
         method: 'POST',
-        body: JSON.stringify({ name: name.trim(), url: url.trim(), max_defaults: maxDefaults }),
+        body: JSON.stringify({ name: name.trim(), url: url.trim(), max_defaults: maxDefaults, appnexus }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(data.message ?? `Create failed (${res.status}).`)
+        const upstreamMessage = Array.isArray(data.messages)
+          ? data.messages.map(m => m.description).filter(Boolean).join(' ')
+          : ''
+        setError(upstreamMessage || data.message || `Create failed (${res.status}).`)
         return
       }
       onCreated('Placement created successfully.')
@@ -82,6 +86,17 @@ export default function CreatePlacementModal({ publisherId, onClose, onCreated }
               value={maxDefaults}
               onChange={e => setMaxDefaults(Number(e.target.value))}
             />
+          </div>
+          <div style={s.fieldRow}>
+            <span style={s.fieldLabel}>Appnexus</span>
+            <label style={s.radioLabel}>
+              <input
+                type="checkbox"
+                checked={appnexus}
+                onChange={e => setAppnexus(e.target.checked)}
+              />
+              Enabled
+            </label>
           </div>
           <div style={s.fieldRow}>
             <span style={s.fieldLabel}>Creative Type</span>

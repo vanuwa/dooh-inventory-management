@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -469,6 +470,44 @@ func TestPublisherPlacements_Success(t *testing.T) {
 	}
 	if len(body.Placements) != 2 {
 		t.Errorf("placements: want 2, got %d", len(body.Placements))
+	}
+}
+
+func TestGetPublisherPlacement_IncludesAppnexus(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"inventory_id":100,"zone_id":200}]}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"url":"example.com","max_defaults":3}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100/zones/200/placements/101": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"appnexus":true}`))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body["appnexus"]; got != true {
+		t.Errorf("appnexus: want true, got %v", got)
 	}
 }
 
@@ -1017,6 +1056,159 @@ func TestCreatePublisherUser_DeleteStillBlocked(t *testing.T) {
 
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status: want 405, got %d", resp.StatusCode)
+	}
+}
+
+// --- Create placement ---
+
+func TestCreatePublisherPlacement_ForwardsAppnexusFlag(t *testing.T) {
+	for _, appnexus := range []bool{true, false} {
+		t.Run(fmt.Sprintf("appnexus=%v", appnexus), func(t *testing.T) {
+			var placementPayload map[string]any
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				"/publisher/v1/publishers/42/inventories": func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					w.Write([]byte(`{"id":100}`))
+				},
+				"/publisher/v1/publishers/42/inventories/100/zones": func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					w.Write([]byte(`{"id":200}`))
+				},
+				"/publisher/v1/publishers/42/inventories/100/zones/200/placements": func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewDecoder(r.Body).Decode(&placementPayload); err != nil {
+						t.Fatal(err)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusCreated)
+					w.Write([]byte(`{"id":999}`))
+				},
+			})
+			app := appServer(t, upstream.URL)
+
+			body, _ := json.Marshal(map[string]any{
+				"name": "Test Placement", "url": "example.com", "max_defaults": 1, "appnexus": appnexus,
+			})
+			req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/publishers/42/placements", bytes.NewReader(body))
+			req.Header.Set("X-Access-Token", "mock-access-token")
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("status: want 201, got %d", resp.StatusCode)
+			}
+			if got := placementPayload["appnexus"]; got != appnexus {
+				t.Errorf("appnexus: want %v, got %v", appnexus, got)
+			}
+		})
+	}
+}
+
+func TestUpdatePublisherPlacement_ForwardsAppnexusAndStatus(t *testing.T) {
+	var placementPayload map[string]any
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"inventory_id":100,"zone_id":200}]}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"name":"Screen A","url":"example.com","max_defaults":1}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100/zones/200/placements/101": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"name":"Screen A","placement_status":true,"appnexus":true,"appnexus_name":"Some AppNexus Name","placement_type":"multiformat","position":"unknown","primary_size":"1x1 (Pixel)"}`))
+				return
+			}
+			if err := json.NewDecoder(r.Body).Decode(&placementPayload); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":101}`))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "Screen A", "url": "example.com", "max_defaults": 1, "appnexus": false, "placement_status": false,
+	})
+	req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101", bytes.NewReader(body))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := placementPayload["appnexus"]; got != false {
+		t.Errorf("appnexus: want false, got %v", got)
+	}
+	if got := placementPayload["placement_status"]; got != false {
+		t.Errorf("placement_status: want false, got %v", got)
+	}
+	if got := placementPayload["appnexus_name"]; got != "" {
+		t.Errorf("appnexus_name: want cleared to empty string when appnexus is false, got %v", got)
+	}
+}
+
+func TestUpdatePublisherPlacement_ProxiesUpstreamValidationError(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"inventory_id":100,"zone_id":200}]}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"name":"Screen A","url":"example.com","max_defaults":1}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100/zones/200/placements/101": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"name":"Screen A","placement_status":true,"appnexus":true,"placement_type":"multiformat","position":"unknown","primary_size":"1x1 (Pixel)"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"type":"ValidationException","messages":[{"error_code":"placement.appnexus.inactive","property_name":"appnexus","description":"Cannot enable appnexus on an inactive placement"}]}`))
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "Screen A", "url": "example.com", "max_defaults": 1, "appnexus": true, "placement_status": false,
+	})
+	req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101", bytes.NewReader(body))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", resp.StatusCode)
+	}
+	var errBody struct {
+		Messages []struct {
+			Description string `json:"description"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(errBody.Messages) != 1 || errBody.Messages[0].Description != "Cannot enable appnexus on an inactive placement" {
+		t.Errorf("expected upstream validation description to be proxied through, got %+v", errBody)
 	}
 }
 

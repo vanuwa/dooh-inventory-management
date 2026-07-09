@@ -436,6 +436,10 @@ export default function PlacementDetail() {
                 <span style={s.cardLabel}>Status</span>
                 <StatusBadge active={placement.placement_status} />
               </div>
+              <div style={s.cardRow}>
+                <span style={s.cardLabel}>Appnexus</span>
+                <StatusBadge active={placement.appnexus} labels={['Enabled', 'Disabled']} />
+              </div>
             </div>
           </div>
         )}

@@ -57,11 +57,16 @@ type PlacementDetailResponse struct {
 	PublisherPlacement
 	InventoryURL string `json:"inventory_url,omitempty"`
 	MaxDefaults  int32  `json:"max_defaults,omitempty"`
+	Appnexus     bool   `json:"appnexus"`
 }
 
 type inventoryDetailUpstream struct {
 	URL         string `json:"url"`
 	MaxDefaults int32  `json:"max_defaults"`
+}
+
+type placementDetailUpstream struct {
+	Appnexus bool `json:"appnexus"`
 }
 
 type publisherPlacementsResponse struct {
@@ -359,6 +364,20 @@ func (h *PublishersHandler) GetPublisherPlacement(w http.ResponseWriter, r *http
 			if json.Unmarshal(invBody, &inv) == nil {
 				resp.InventoryURL = inv.URL
 				resp.MaxDefaults = inv.MaxDefaults
+			}
+		}
+	}
+
+	// Call 3: fetch the full placement (v2 search doesn't return appnexus). Soft
+	// failure — return placement data even if this call fails.
+	if found.InventoryID != 0 && found.ZoneID != 0 {
+		plDetailPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d/placements/%s",
+			url.PathEscape(publisherID), found.InventoryID, found.ZoneID, placementID)
+		plDetailBody, plDetailStatus, _, plDetailErr := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, plDetailPath, accessToken, nil, "")
+		if plDetailErr == nil && plDetailStatus == http.StatusOK {
+			var plDetail placementDetailUpstream
+			if json.Unmarshal(plDetailBody, &plDetail) == nil {
+				resp.Appnexus = plDetail.Appnexus
 			}
 		}
 	}
@@ -844,6 +863,7 @@ type createPlacementRequest struct {
 	Name        string `json:"name"`
 	URL         string `json:"url"`
 	MaxDefaults int    `json:"max_defaults"`
+	Appnexus    bool   `json:"appnexus"`
 }
 
 // CreatePublisherPlacement handles POST /api/publishers/{id}/placements.
@@ -964,7 +984,7 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 		"name":               req.Name,
 		"placement_status":   true,
 		"placement_type":     "multiformat",
-		"appnexus":           true,
+		"appnexus":           req.Appnexus,
 		"pub_click_tracking": false,
 	}
 	plBody, err := json.Marshal(plPayload)
@@ -989,9 +1009,11 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 }
 
 type updatePlacementRequest struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	MaxDefaults int    `json:"max_defaults"`
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	MaxDefaults     int    `json:"max_defaults"`
+	Appnexus        bool   `json:"appnexus"`
+	PlacementStatus bool   `json:"placement_status"`
 }
 
 func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *http.Request) {
@@ -1098,6 +1120,11 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	}
 
 	plData["name"] = req.Name
+	plData["appnexus"] = req.Appnexus
+	if !req.Appnexus {
+		plData["appnexus_name"] = ""
+	}
+	plData["placement_status"] = req.PlacementStatus
 
 	plPayload, err := json.Marshal(plData)
 	if err != nil {
@@ -1107,10 +1134,6 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	plResp, plStatus, plHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, plPath, accessToken, plPayload, "application/json")
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadGateway, "upstream request failed")
-		return
-	}
-	if plStatus < 200 || plStatus >= 300 {
-		writeErrorJSON(w, http.StatusBadGateway, "failed to update placement name (site details were saved)")
 		return
 	}
 	writeProxyResponse(w, plStatus, plResp, plHeaders)

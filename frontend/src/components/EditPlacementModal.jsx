@@ -6,8 +6,15 @@ export default function EditPlacementModal({ publisherId, placementId, placement
   const [name, setName] = useState(placement.name ?? '')
   const [url, setUrl] = useState(placement.inventory_url ?? '')
   const [maxDefaults, setMaxDefaults] = useState(placement.max_defaults ?? 1)
+  const [active, setActive] = useState(placement.placement_status ?? true)
+  const [appnexus, setAppnexus] = useState(placement.appnexus ?? false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  function handleActiveChange(checked) {
+    setActive(checked)
+    if (!checked) setAppnexus(false)
+  }
 
   async function handleSubmit() {
     if (submitting) return
@@ -20,11 +27,14 @@ export default function EditPlacementModal({ publisherId, placementId, placement
     try {
       const res = await apiFetch(`/publishers/${publisherId}/placements/${placementId}`, {
         method: 'PUT',
-        body: JSON.stringify({ name: name.trim(), url: url.trim(), max_defaults: maxDefaults }),
+        body: JSON.stringify({ name: name.trim(), url: url.trim(), max_defaults: maxDefaults, appnexus, placement_status: active }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(data.message ?? `Save failed (${res.status}).`)
+        const upstreamMessage = Array.isArray(data.messages)
+          ? data.messages.map(m => m.description).filter(Boolean).join(' ')
+          : ''
+        setError(upstreamMessage || data.message || `Save failed (${res.status}).`)
         return
       }
       onSaved({
@@ -33,6 +43,8 @@ export default function EditPlacementModal({ publisherId, placementId, placement
         inventory_name: name.trim(),
         inventory_url: url.trim(),
         max_defaults: maxDefaults,
+        appnexus,
+        placement_status: active,
       })
     } catch (err) {
       if (err.message !== 'Unauthorized') setError('Save failed.')
@@ -77,6 +89,25 @@ export default function EditPlacementModal({ publisherId, placementId, placement
               value={maxDefaults}
               onChange={e => setMaxDefaults(Number(e.target.value))}
             />
+          </div>
+          <div style={s.fieldRow}>
+            <span style={s.fieldLabel}>Status</span>
+            <label style={s.radioLabel}>
+              <input type="checkbox" checked={active} onChange={e => handleActiveChange(e.target.checked)} />
+              Active
+            </label>
+          </div>
+          <div style={s.fieldRow}>
+            <span style={s.fieldLabel}>Appnexus</span>
+            <label style={active ? s.radioLabel : s.radioLabelDisabled}>
+              <input
+                type="checkbox"
+                checked={appnexus}
+                disabled={!active}
+                onChange={e => setAppnexus(e.target.checked)}
+              />
+              Enabled
+            </label>
           </div>
 
           {error && <p style={s.error}>{error}</p>}

@@ -6,9 +6,9 @@ const badge = {
   fontWeight: 500,
 }
 
-export function StatusBadge({ active }) {
+export function StatusBadge({ active, labels = ['Active', 'Inactive'] }) {
   const style = active
     ? { ...badge, background: '#dcfce7', color: '#15803d' }
     : { ...badge, background: '#f3f4f6', color: '#6b7280' }
-  return <span style={style}>{active ? 'Active' : 'Inactive'}</span>
+  return <span style={style}>{active ? labels[0] : labels[1]}</span>
 }
