@@ -55,6 +55,10 @@ const FIELD_HELP = {
   },
 }
 
+const FIELD_OPTIONS = {
+  orientation: ['', 'landscape', 'portrait', 'square'],
+}
+
 function coerceTypes(vals) {
   const intFields = ['publisher_id', 'placement_id', 'resolution_width', 'resolution_height', 'venue_type_id', 'width', 'height', 'min_duration', 'max_duration']
   const floatFields = ['lat', 'lon', 'avg_weekly_audience', 'cpm']
@@ -173,6 +177,9 @@ export default function PlacementDetail() {
           placement_id: placementId,
           venue_type_tax: 'OpenOOH Venue Taxonomy 1.1',
           allowed_content: 'VIDEO',
+          resolution_width: 1920,
+          resolution_height: 1080,
+          currency_code: 'EUR',
         })
         setValidationErrors({})
         setSaveError('')
@@ -616,16 +623,30 @@ export default function PlacementDetail() {
                           </td>
                           <td style={s.modalValue}>
                             {isFormActive && editable
-                              ? <input
-                                  type={inputType}
-                                  value={editValues[field] ?? ''}
-                                  onChange={e => {
-                                    setEditValues(prev => ({ ...prev, [field]: e.target.value }))
-                                    if (validationErrors[field]) setValidationErrors(prev => { const n = { ...prev }; delete n[field]; return n })
-                                  }}
-                                  style={validationErrors[field] ? s_editInputError : s.editInput}
-                                  step={inputType === 'number' ? 'any' : undefined}
-                                />
+                              ? (FIELD_OPTIONS[field]
+                                  ? <select
+                                      value={editValues[field] ?? ''}
+                                      onChange={e => {
+                                        setEditValues(prev => ({ ...prev, [field]: e.target.value }))
+                                        if (validationErrors[field]) setValidationErrors(prev => { const n = { ...prev }; delete n[field]; return n })
+                                      }}
+                                      style={validationErrors[field] ? s_editInputError : s.editInput}
+                                    >
+                                      {FIELD_OPTIONS[field].map(opt => (
+                                        <option key={opt} value={opt}>{opt === '' ? '—' : opt}</option>
+                                      ))}
+                                    </select>
+                                  : <input
+                                      type={inputType}
+                                      value={editValues[field] ?? ''}
+                                      onChange={e => {
+                                        setEditValues(prev => ({ ...prev, [field]: e.target.value }))
+                                        if (validationErrors[field]) setValidationErrors(prev => { const n = { ...prev }; delete n[field]; return n })
+                                      }}
+                                      style={validationErrors[field] ? s_editInputError : s.editInput}
+                                      step={inputType === 'number' ? 'any' : undefined}
+                                    />
+                                )
                               : (displaySource?.[field] != null && displaySource?.[field] !== '' ? String(displaySource[field]) : '—')
                             }
                           </td>
