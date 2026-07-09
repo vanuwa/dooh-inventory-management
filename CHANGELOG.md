@@ -7,6 +7,8 @@
 - Placement detail info card now shows an "Appnexus" row (Enabled/Disabled); backend fetches it via an additional upstream call since the placements list endpoint doesn't return it
 - Edit Placement modal now exposes "Status" (Active) and "Appnexus" (Enabled) checkboxes; unchecking Active automatically unchecks and disables Appnexus, since a placement can't have AppNexus enabled while inactive
 - `StatusBadge` component accepts an optional `labels` prop so it can render "Enabled/Disabled" alongside its existing "Active/Inactive" usage
+- Create Screen form now prefills Resolution Width (1920), Resolution Height (1080), and Currency Code (EUR) — all still editable; Orientation defaults to unselected
+- Orientation on the Create/Edit Screen form is now a dropdown (empty, landscape, portrait, square) instead of free text
 
 ### Bug Fixes
 - Fixed Create/Edit Placement modals showing a generic failure message instead of the upstream validation reason; both now parse the SSP's `{messages: [{description}]}` error shape
