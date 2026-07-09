@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-09
+
+### Features
+- Added an "Appnexus" checkbox to the Create Placement modal (defaults to checked); backend now forwards the selected value instead of hardcoding `appnexus: true`, which previously caused creation to fail with `placement.appnexus.forbidden` for publishers without AppNexus enabled
+- Placement detail info card now shows an "Appnexus" row (Enabled/Disabled); backend fetches it via an additional upstream call since the placements list endpoint doesn't return it
+- Edit Placement modal now exposes "Status" (Active) and "Appnexus" (Enabled) checkboxes; unchecking Active automatically unchecks and disables Appnexus, since a placement can't have AppNexus enabled while inactive
+- `StatusBadge` component accepts an optional `labels` prop so it can render "Enabled/Disabled" alongside its existing "Active/Inactive" usage
+
+### Bug Fixes
+- Fixed Create/Edit Placement modals showing a generic failure message instead of the upstream validation reason; both now parse the SSP's `{messages: [{description}]}` error shape
+- Fixed `UpdatePublisherPlacement` discarding the real upstream error body on a failed placement update, always returning "failed to update placement name (site details were saved)" regardless of the actual cause
+- Fixed disabling Appnexus on an existing placement failing validation ("appnexus name cannot be defined") because the stale `appnexus_name` field wasn't cleared when `appnexus` was set to false
+
 ## 2026-07-02
 
 ### Features
