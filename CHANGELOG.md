@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-22
+
+### Features
+- Added a Map tab to the DOOH Metadata page (`/dooh-metadata/map`) that plots screens on an interactive Leaflet + OpenStreetMap map with marker clustering; the Table and Map tabs share the country/publisher filters and preserve them across tab switches
+- Map screens load from the existing `/dooh-metadata` endpoint (up to a 2000-screen cap), with banners when the set is capped or when screens have no coordinates; clicking a pin shows screen ID, publisher, location, venue type, and coordinates
+- Leaflet is lazy-loaded so it stays out of the initial bundle and only downloads when the Map tab is opened; the basemap lives behind a single config seam (`mapConfig.js`) for a later swap to a self-hosted or keyed tile provider
+
 ## 2026-07-09
 
 ### Features
