@@ -1,9 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useSearchParams, useLocation, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api.js'
 import Layout from '../components/Layout.jsx'
 import { tableStyles as ts } from '../styles/tables.js'
+import { tabStyles } from '../styles/tabs.js'
 import { useDebounce } from '../hooks/useDebounce.js'
+import { fmtPublisher } from '../utils/format.js'
+
+// Lazy-loaded so Leaflet + clustering stay out of the initial bundle and only
+// download when the Map tab is opened.
+const ScreenMap = lazy(() => import('../components/ScreenMap.jsx'))
 
 const PAGE_SIZES = [10, 20, 50, 100, 500, 1000, 2000, 5000, 10000]
 
@@ -16,6 +22,9 @@ function limitFromParams(searchParams) {
 
 export default function DoohMetadata() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const activeTab = location.pathname.endsWith('/map') ? 'map' : 'table'
 
   const [user, setUser] = useState(null)
   const [items, setItems] = useState([])
@@ -66,8 +75,9 @@ export default function DoohMetadata() {
     setSearchParams(next, { replace: true })
   }, [page, limit, debouncedCountry, debouncedPublisherId])
 
-  // Fetch
+  // Fetch (table tab only — the Map tab fetches its own set in ScreenMap)
   useEffect(() => {
+    if (activeTab === 'map') return
     setLoading(true)
     setError('')
 
@@ -93,7 +103,7 @@ export default function DoohMetadata() {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [page, debouncedCountry, debouncedPublisherId, limit])
+  }, [page, debouncedCountry, debouncedPublisherId, limit, activeTab])
 
   function handleLimitChange(e) {
     const val = Number(e.target.value)
@@ -131,11 +141,6 @@ export default function DoohMetadata() {
     return `${lat}, ${lon}`
   }
 
-  function fmtPublisher(id, name) {
-    if (id == null) return '—'
-    return name ? `${name} (${id})` : String(id)
-  }
-
   function fmtAllowedContent(arr) {
     if (!arr || arr.length === 0) return '—'
     return arr.join(', ')
@@ -146,10 +151,115 @@ export default function DoohMetadata() {
     return `${arr.length} rule${arr.length !== 1 ? 's' : ''}`
   }
 
+  const mapView = (
+    <Suspense fallback={<p style={s.info}>Loading map…</p>}>
+      <ScreenMap country={debouncedCountry} publisherId={debouncedPublisherId} />
+    </Suspense>
+  )
+
+  const tableView = (
+    <>
+      {error && <p style={s.error}>{error}</p>}
+      {loading && <p style={s.info}>Loading…</p>}
+      {!loading && items.length === 0 && !error && <p style={s.info}>No records found.</p>}
+
+      {!loading && items.length > 0 && (
+        <>
+          <div style={ts.tableWrapper}>
+            <table style={ts.table}>
+              <thead>
+                <tr>
+                  <th style={ts.thCompact}>Screen ID</th>
+                  <th style={ts.thCompact}>Publisher</th>
+                  <th style={ts.thCompact}>Country</th>
+                  <th style={ts.thCompact}>City</th>
+                  <th style={ts.thCompact}>Region</th>
+                  <th style={ts.thCompact}>ZIP</th>
+                  <th style={ts.thCompact}>Venue Type</th>
+                  <th style={ts.thCompact}>Location</th>
+                  <th style={ts.thCompact}>Size (px)</th>
+                  <th style={ts.thCompact}>Resolution</th>
+                  <th style={ts.thCompact}>Duration</th>
+                  <th style={ts.thCompact}>CPM</th>
+                  <th style={ts.thCompact}>Est. Impr/wk</th>
+                  <th style={ts.thCompact}>Multiplier Vendor</th>
+                  <th style={ts.thCompact}>Multiplier Src</th>
+                  <th style={ts.thCompact}>Venue Tax ID</th>
+                  <th style={ts.thCompact}>Allowed Content</th>
+                  <th style={ts.thCompact}>Multipliers</th>
+                  <th style={ts.thCompact}>Screen Image</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, i) => (
+                  <tr key={item.screen_id || `idx-${i}`} style={i % 2 !== 0 ? ts.rowAlt : undefined}>
+                    <td style={ts.tdCompact}>{fmt(item.screen_id)}</td>
+                    <td style={ts.tdCompact}>{fmtPublisher(item.publisher_id, item.publisher_name)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.country_code)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.city)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.region)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.zip)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.venue_type_id)}</td>
+                    <td style={ts.tdCompact}>{fmtLocation(item.lat, item.lon)}</td>
+                    <td style={ts.tdCompact}>{fmtSize(item.width, item.height)}</td>
+                    <td style={ts.tdCompact}>{fmtSize(item.resolution_width, item.resolution_height)}</td>
+                    <td style={ts.tdCompact}>{fmtDuration(item.min_duration, item.max_duration)}</td>
+                    <td style={ts.tdCompact}>{fmtCpm(item.cpm, item.currency_code)}</td>
+                    <td style={ts.tdCompact}>{fmtImpressions(item.estimated_weekly_impressions)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.multiplier_vendor)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.multiplier_source_type_id)}</td>
+                    <td style={ts.tdCompact}>{fmt(item.venue_type_tax_id)}</td>
+                    <td style={ts.tdCompact}>{fmtAllowedContent(item.allowed_content)}</td>
+                    <td style={ts.tdCompact}>{fmtMultipliers(item.dooh_multipliers)}</td>
+                    <td style={ts.tdCompact}>
+                      {item.screen_image_url
+                        ? <button style={s.viewBtn} onClick={() => setPreviewUrl(item.screen_image_url)}>View</button>
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ ...ts.pagination, justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <button style={page === 1 ? s.pageBtnOff : ts.pageBtn} onClick={() => setPage(1)} disabled={page === 1}>First</button>
+              <button style={page === 1 ? s.pageBtnOff : ts.pageBtn} onClick={() => setPage(p => p - 1)} disabled={page === 1}>Prev</button>
+              <span style={ts.pageInfo}>Page {page}</span>
+              <button style={!hasMore ? s.pageBtnOff : ts.pageBtn} onClick={() => setPage(p => p + 1)} disabled={!hasMore}>Next</button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={ts.pageInfo}>Rows per page:</span>
+              <select style={s.pageSizeSelect} value={limit} onChange={handleLimitChange}>
+                {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  )
+
   return (
     <Layout user={user}>
       <main style={s.main}>
         <h1 style={s.heading}>DOOH Metadata</h1>
+
+        <div style={tabStyles.tabBar}>
+          <button
+            style={activeTab === 'table' ? tabStyles.tabActive : tabStyles.tab}
+            onClick={() => navigate({ pathname: '/dooh-metadata', search: location.search })}
+          >
+            Table
+          </button>
+          <button
+            style={activeTab === 'map' ? tabStyles.tabActive : tabStyles.tab}
+            onClick={() => navigate({ pathname: '/dooh-metadata/map', search: location.search })}
+          >
+            Map
+          </button>
+        </div>
 
         <div style={s.filters}>
           <input
@@ -167,85 +277,7 @@ export default function DoohMetadata() {
           />
         </div>
 
-        {error && <p style={s.error}>{error}</p>}
-        {loading && <p style={s.info}>Loading…</p>}
-        {!loading && items.length === 0 && !error && <p style={s.info}>No records found.</p>}
-
-        {!loading && items.length > 0 && (
-          <>
-            <div style={ts.tableWrapper}>
-              <table style={ts.table}>
-                <thead>
-                  <tr>
-                    <th style={ts.thCompact}>Screen ID</th>
-                    <th style={ts.thCompact}>Publisher</th>
-                    <th style={ts.thCompact}>Country</th>
-                    <th style={ts.thCompact}>City</th>
-                    <th style={ts.thCompact}>Region</th>
-                    <th style={ts.thCompact}>ZIP</th>
-                    <th style={ts.thCompact}>Venue Type</th>
-                    <th style={ts.thCompact}>Location</th>
-                    <th style={ts.thCompact}>Size (px)</th>
-                    <th style={ts.thCompact}>Resolution</th>
-                    <th style={ts.thCompact}>Duration</th>
-                    <th style={ts.thCompact}>CPM</th>
-                    <th style={ts.thCompact}>Est. Impr/wk</th>
-                    <th style={ts.thCompact}>Multiplier Vendor</th>
-                    <th style={ts.thCompact}>Multiplier Src</th>
-                    <th style={ts.thCompact}>Venue Tax ID</th>
-                    <th style={ts.thCompact}>Allowed Content</th>
-                    <th style={ts.thCompact}>Multipliers</th>
-                    <th style={ts.thCompact}>Screen Image</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, i) => (
-                    <tr key={item.screen_id || `idx-${i}`} style={i % 2 !== 0 ? ts.rowAlt : undefined}>
-                      <td style={ts.tdCompact}>{fmt(item.screen_id)}</td>
-                      <td style={ts.tdCompact}>{fmtPublisher(item.publisher_id, item.publisher_name)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.country_code)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.city)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.region)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.zip)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.venue_type_id)}</td>
-                      <td style={ts.tdCompact}>{fmtLocation(item.lat, item.lon)}</td>
-                      <td style={ts.tdCompact}>{fmtSize(item.width, item.height)}</td>
-                      <td style={ts.tdCompact}>{fmtSize(item.resolution_width, item.resolution_height)}</td>
-                      <td style={ts.tdCompact}>{fmtDuration(item.min_duration, item.max_duration)}</td>
-                      <td style={ts.tdCompact}>{fmtCpm(item.cpm, item.currency_code)}</td>
-                      <td style={ts.tdCompact}>{fmtImpressions(item.estimated_weekly_impressions)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.multiplier_vendor)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.multiplier_source_type_id)}</td>
-                      <td style={ts.tdCompact}>{fmt(item.venue_type_tax_id)}</td>
-                      <td style={ts.tdCompact}>{fmtAllowedContent(item.allowed_content)}</td>
-                      <td style={ts.tdCompact}>{fmtMultipliers(item.dooh_multipliers)}</td>
-                      <td style={ts.tdCompact}>
-                        {item.screen_image_url
-                          ? <button style={s.viewBtn} onClick={() => setPreviewUrl(item.screen_image_url)}>View</button>
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ ...ts.pagination, justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <button style={page === 1 ? s.pageBtnOff : ts.pageBtn} onClick={() => setPage(1)} disabled={page === 1}>First</button>
-                <button style={page === 1 ? s.pageBtnOff : ts.pageBtn} onClick={() => setPage(p => p - 1)} disabled={page === 1}>Prev</button>
-                <span style={ts.pageInfo}>Page {page}</span>
-                <button style={!hasMore ? s.pageBtnOff : ts.pageBtn} onClick={() => setPage(p => p + 1)} disabled={!hasMore}>Next</button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={ts.pageInfo}>Rows per page:</span>
-                <select style={s.pageSizeSelect} value={limit} onChange={handleLimitChange}>
-                  {PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </div>
-            </div>
-          </>
-        )}
+        {activeTab === 'map' ? mapView : tableView}
       </main>
 
       {previewUrl && (

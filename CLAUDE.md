@@ -108,7 +108,7 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 
 ### Key Implementation Details
 
-- **No CSS files** — all styling is inline style objects in JSX (shared ones in `src/styles/`). Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg).
+- **No CSS files** — all styling is inline style objects in JSX (shared ones in `src/styles/`). Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg). Exception: third-party components may require their own stylesheets — e.g. `ScreenMap.jsx` imports Leaflet/markercluster CSS, which the map cannot render without. Vendor CSS imports are allowed; app styling stays inline.
 - **Tabs and modals are URL-reflected:** tabs are routes (e.g. `/publishers/:id/users`, `.../placements/:placementId/screens`); the screens modal uses a `?screen={id}` search param so screen URLs are shareable.
 - **Server-side pagination everywhere:** publishers, publisher placements, and screens all paginate/search upstream. Search inputs are debounced 300ms (`useDebounce`).
 - **Abort signals:** async fetch operations use `AbortController` to cancel in-flight requests on unmount.

@@ -113,6 +113,14 @@ export default function App() {
             }
           />
           <Route
+            path="/dooh-metadata/map"
+            element={
+              <ProtectedRoute>
+                <DoohMetadata />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/changelog"
             element={
               <ProtectedRoute>
