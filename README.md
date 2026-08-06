@@ -63,6 +63,29 @@ cp .env.example .env   # if available, otherwise create it manually
 ```env
 IMPROVE_CLIENT_ID=your_client_id
 IMPROVE_CLIENT_SECRET=your_client_secret
+
+# Optional — enables the Google Maps basemap on the DOOH Metadata map tab
+GOOGLE_MAPS_API_KEY=your_google_maps_browser_key
+GOOGLE_MAPS_MAP_ID=your_cloud_map_id
+```
+
+**Google Maps (optional).** The map tab on `/dooh-metadata` offers two basemaps:
+OpenStreetMap (always available, no key) and Google Maps. Google Maps is only
+enabled when `GOOGLE_MAPS_API_KEY` is set — otherwise that option renders
+disabled and OpenStreetMap is used. `GOOGLE_MAPS_MAP_ID` is optional and falls
+back to Google's `DEMO_MAP_ID`.
+
+The key is baked into the JS bundle at build time (it is a browser key, so it is
+necessarily visible to the client) — restrict it by HTTP referrer and API in the
+Google Cloud console. Note that Google dynamic map loads are billed beyond the
+free tier, which is why OpenStreetMap remains the default.
+
+For local `npm run dev`, Vite reads `frontend/.env` rather than this root file,
+and expects the `VITE_`-prefixed names:
+
+```env
+VITE_GOOGLE_MAPS_API_KEY=your_google_maps_browser_key
+VITE_GOOGLE_MAPS_MAP_ID=your_cloud_map_id
 ```
 
 ### 2. Start everything

@@ -19,6 +19,8 @@ services:
       args:
         - GIT_COMMIT=${GIT_COMMIT:-unknown}
         - GIT_BRANCH=${GIT_BRANCH:-main}
+        - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY:-}
+        - GOOGLE_MAPS_MAP_ID=${GOOGLE_MAPS_MAP_ID:-}
     image: dooh-inventory-ui
     container_name: dooh-inventory-ui
     ports:

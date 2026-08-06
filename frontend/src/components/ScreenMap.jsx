@@ -1,56 +1,17 @@
-import { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
-import MarkerClusterGroup from 'react-leaflet-cluster'
-import L from 'leaflet'
+import { useState, useEffect, useMemo, useRef, useLayoutEffect, lazy, Suspense } from 'react'
 import { apiFetch } from '../api.js'
-import { fmtPublisher } from '../utils/format.js'
+import { tableStyles as ts } from '../styles/tables.js'
 import {
-  TILE_URL,
-  TILE_ATTRIBUTION,
-  MAX_ZOOM,
-  DEFAULT_CENTER,
-  DEFAULT_ZOOM,
   MAP_MARKER_CAP,
+  MAP_PROVIDERS,
+  GOOGLE_MAPS_AVAILABLE,
 } from '../constants/mapConfig.js'
 
-// Leaflet + markercluster ship their own stylesheets; the map cannot render
-// without them. This is a deliberate exception to the app's "no CSS files"
-// convention (see the styling note in CLAUDE.md) — these are vendor styles,
-// not app styles.
-import 'leaflet/dist/leaflet.css'
-import 'leaflet.markercluster/dist/MarkerCluster.css'
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
-
-// Leaflet's default marker icons resolve to broken paths under a bundler.
-// Repoint them at the bundled image assets so pins actually render.
-import iconUrl from 'leaflet/dist/images/marker-icon.png'
-import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
-import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
-
-delete L.Icon.Default.prototype._getIconUrl
-L.Icon.Default.mergeOptions({ iconUrl, iconRetinaUrl, shadowUrl })
-
-// Fit the map to the loaded markers once they change. Needs the map instance,
-// so it lives as a child of MapContainer via useMap().
-function FitBounds({ points }) {
-  const map = useMap()
-  useEffect(() => {
-    if (points.length === 0) return
-    const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]))
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 })
-  }, [points, map])
-  return null
-}
-
-// Leaflet caches its container size, so a CSS-driven height change (e.g. a
-// banner appearing/disappearing above the map) needs an explicit invalidate.
-function ResizeHandler({ trigger }) {
-  const map = useMap()
-  useEffect(() => {
-    map.invalidateSize()
-  }, [trigger, map])
-  return null
-}
+// Each provider is lazy-loaded so only the chosen one's chunk downloads —
+// Leaflet (plus its vendor CSS and icon assets) and the Google Maps SDK stay
+// out of each other's way, and out of the initial bundle entirely.
+const LeafletScreenMap = lazy(() => import('./map/LeafletScreenMap.jsx'))
+const GoogleScreenMap = lazy(() => import('./map/GoogleScreenMap.jsx'))
 
 // Isolated fetch — reuses /dooh-metadata for the PoC. When a dedicated map
 // endpoint (e.g. /dooh-metadata/geo, possibly with different filters) lands,
@@ -62,14 +23,13 @@ function buildPath(country, publisherId) {
   return path
 }
 
-export default function ScreenMap({ country, publisherId }) {
+export default function ScreenMap({ country, publisherId, provider, onProviderChange }) {
   const [items, setItems] = useState([])
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   // Bumped on each successful load so the cluster layer refreshes its markers
-  // without remounting the whole MapContainer (which would reload tiles and
-  // reset the user's view on every filter change).
+  // without remounting the map (which would reload tiles and reset the view).
   const [loadId, setLoadId] = useState(0)
 
   useEffect(() => {
@@ -120,13 +80,50 @@ export default function ScreenMap({ country, publisherId }) {
     return () => window.removeEventListener('resize', recompute)
   }, [hasMore, skipped, loading, error])
 
+  const switcher = (
+    <div style={s.switcherRow}>
+      <span style={ts.pageInfo}>Basemap:</span>
+      <div style={s.switcher}>
+        {MAP_PROVIDERS.map((p, idx, arr) => {
+          const isDisabled = p.id === 'google' && !GOOGLE_MAPS_AVAILABLE
+          const isActive = provider === p.id
+          return (
+            <button
+              key={p.id}
+              disabled={isDisabled}
+              title={isDisabled ? 'Google Maps API key is not configured for this build' : undefined}
+              style={{
+                padding: '0.4375rem 0.75rem',
+                background: isActive ? '#1a1a2e' : '#fff',
+                color: isDisabled ? '#9ca3af' : (isActive ? '#fff' : '#374151'),
+                border: 'none',
+                borderRight: idx < arr.length - 1 ? '1px solid #d1d5db' : 'none',
+                cursor: isDisabled ? 'default' : 'pointer',
+                fontSize: '0.8125rem',
+                fontWeight: isActive ? 500 : 400,
+              }}
+              onClick={() => onProviderChange(p.id)}
+            >
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+
   // First load with nothing to show yet — keep the whole-view placeholder.
   // Once we have data, later fetches keep the map mounted and overlay a badge.
-  if (loading && items.length === 0) return <p style={s.info}>Loading map…</p>
-  if (error && items.length === 0) return <p style={s.error}>{error}</p>
+  if (loading && items.length === 0) {
+    return <div>{switcher}<p style={s.info}>Loading map…</p></div>
+  }
+  if (error && items.length === 0) {
+    return <div>{switcher}<p style={s.error}>{error}</p></div>
+  }
 
   return (
     <div>
+      {switcher}
       {error && <p style={s.error}>{error}</p>}
       {hasMore && (
         <p style={s.warn}>
@@ -143,31 +140,11 @@ export default function ScreenMap({ country, publisherId }) {
         <p style={s.info}>No screens with coordinates to display.</p>
       ) : (
         <div ref={wrapRef} style={{ ...s.mapWrap, height: mapHeight }}>
-          <MapContainer center={DEFAULT_CENTER} zoom={DEFAULT_ZOOM} style={s.map} scrollWheelZoom>
-            <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={MAX_ZOOM} />
-            <FitBounds points={markers} />
-            <ResizeHandler trigger={mapHeight} />
-            <MarkerClusterGroup key={loadId} chunkedLoading>
-              {markers.map((m, i) => (
-                <Marker key={m.screen_id || `idx-${i}`} position={[m.lat, m.lon]}>
-                  <Popup>
-                    <div style={s.popup}>
-                      <div style={s.popupTitle}>Screen {m.screen_id || '—'}</div>
-                      <div>
-                        <strong>Publisher:</strong> {fmtPublisher(m.publisher_id, m.publisher_name)}
-                      </div>
-                      <div>
-                        <strong>Location:</strong>{' '}
-                        {[m.city, m.region, m.country_code].filter(Boolean).join(', ') || '—'}
-                      </div>
-                      <div><strong>Venue type:</strong> {m.venue_type_id ?? '—'}</div>
-                      <div><strong>Coords:</strong> {m.lat}, {m.lon}</div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
-            </MarkerClusterGroup>
-          </MapContainer>
+          <Suspense fallback={<p style={s.mapLoading}>Loading map…</p>}>
+            {provider === 'google' && GOOGLE_MAPS_AVAILABLE
+              ? <GoogleScreenMap markers={markers} />
+              : <LeafletScreenMap markers={markers} loadId={loadId} height={mapHeight} />}
+          </Suspense>
           {loading && <div style={s.updating}>Updating…</div>}
         </div>
       )}
@@ -181,9 +158,9 @@ const s = {
   info: { color: '#6b7280', fontSize: '0.9rem' },
   warn: { color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 4, padding: '0.5rem 0.75rem', fontSize: '0.875rem', marginBottom: '0.5rem' },
   error: { color: '#b91c1c', fontSize: '0.9rem' },
+  switcherRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' },
+  switcher: { display: 'flex', border: '1px solid #d1d5db', borderRadius: 4, overflow: 'hidden' },
   mapWrap: { position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid #d1d5db' },
-  map: { height: '100%', width: '100%' },
+  mapLoading: { padding: '1rem', color: '#6b7280', fontSize: '0.9rem' },
   updating: { position: 'absolute', top: 10, right: 10, zIndex: 1000, background: 'rgba(26,26,46,0.85)', color: '#fff', fontSize: '0.75rem', padding: '0.25rem 0.6rem', borderRadius: 4, pointerEvents: 'none' },
-  popup: { fontSize: '0.8125rem', lineHeight: 1.5, minWidth: 180 },
-  popupTitle: { fontWeight: 600, color: '#111827', marginBottom: '0.25rem' },
 }

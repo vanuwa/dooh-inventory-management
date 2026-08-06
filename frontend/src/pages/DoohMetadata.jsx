@@ -6,18 +6,36 @@ import { tableStyles as ts } from '../styles/tables.js'
 import { tabStyles } from '../styles/tabs.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { fmtPublisher } from '../utils/format.js'
+import { MAP_PROVIDER_IDS, DEFAULT_MAP_PROVIDER, GOOGLE_MAPS_AVAILABLE } from '../constants/mapConfig.js'
 
-// Lazy-loaded so Leaflet + clustering stay out of the initial bundle and only
+// Lazy-loaded so the map libraries stay out of the initial bundle and only
 // download when the Map tab is opened.
 const ScreenMap = lazy(() => import('../components/ScreenMap.jsx'))
 
 const PAGE_SIZES = [10, 20, 50, 100, 500, 1000, 2000, 5000, 10000]
+const MAP_PROVIDER_STORAGE_KEY = 'dooh-metadata-map-provider'
 
 function limitFromParams(searchParams) {
   const fromUrl = Number(searchParams.get('limit'))
   if (PAGE_SIZES.includes(fromUrl)) return fromUrl
   const fromStorage = Number(localStorage.getItem('dooh-metadata-page-size'))
   return PAGE_SIZES.includes(fromStorage) ? fromStorage : 20
+}
+
+// A provider is only usable if it's known and actually configured — a shared
+// ?mapProvider=google URL (or stale localStorage) must not select Google on a
+// build with no API key, or the switcher would disagree with what renders.
+function isUsableProvider(id) {
+  if (!MAP_PROVIDER_IDS.includes(id)) return false
+  return id !== 'google' || GOOGLE_MAPS_AVAILABLE
+}
+
+// URL wins, then the remembered choice, then the default.
+function mapProviderFromParams(searchParams) {
+  const fromUrl = searchParams.get('mapProvider')
+  if (isUsableProvider(fromUrl)) return fromUrl
+  const fromStorage = localStorage.getItem(MAP_PROVIDER_STORAGE_KEY)
+  return isUsableProvider(fromStorage) ? fromStorage : DEFAULT_MAP_PROVIDER
 }
 
 export default function DoohMetadata() {
@@ -42,6 +60,7 @@ export default function DoohMetadata() {
     return isNaN(n) || n < 1 ? 1 : n
   })
   const [limit, setLimit] = useState(() => limitFromParams(searchParams))
+  const [mapProvider, setMapProvider] = useState(() => mapProviderFromParams(searchParams))
 
   const debouncedCountry = useDebounce(country, 300)
   const debouncedPublisherId = useDebounce(publisherId, 300)
@@ -72,8 +91,9 @@ export default function DoohMetadata() {
     if (debouncedPublisherId) next.set('publisherId', debouncedPublisherId)
     next.set('limit', String(limit))
     if (page > 1) next.set('page', String(page))
+    if (mapProvider !== DEFAULT_MAP_PROVIDER) next.set('mapProvider', mapProvider)
     setSearchParams(next, { replace: true })
-  }, [page, limit, debouncedCountry, debouncedPublisherId])
+  }, [page, limit, debouncedCountry, debouncedPublisherId, mapProvider])
 
   // Fetch (table tab only — the Map tab fetches its own set in ScreenMap)
   useEffect(() => {
@@ -110,6 +130,11 @@ export default function DoohMetadata() {
     localStorage.setItem('dooh-metadata-page-size', val)
     setLimit(val)
     setPage(1)
+  }
+
+  function handleMapProviderChange(id) {
+    localStorage.setItem(MAP_PROVIDER_STORAGE_KEY, id)
+    setMapProvider(id)
   }
 
   function fmt(v, fallback = '—') {
@@ -153,7 +178,12 @@ export default function DoohMetadata() {
 
   const mapView = (
     <Suspense fallback={<p style={s.info}>Loading map…</p>}>
-      <ScreenMap country={debouncedCountry} publisherId={debouncedPublisherId} />
+      <ScreenMap
+        country={debouncedCountry}
+        publisherId={debouncedPublisherId}
+        provider={mapProvider}
+        onProviderChange={handleMapProviderChange}
+      />
     </Suspense>
   )
 

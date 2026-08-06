@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-08-06
+
+### Features
+- Added a **Basemap** switcher to the DOOH Metadata map tab: screens can now be viewed on either OpenStreetMap (Leaflet, keyless) or Google Maps, which has richer venue/POI data for verifying a screen sits at the expected location
+- Google Maps uses `@vis.gl/react-google-maps` with `@googlemaps/markerclusterer`; markers are built imperatively and clustered so up to 2000 screens render without reconciling thousands of React elements
+- The chosen basemap is remembered per browser and reflected in the URL as `?mapProvider=google`, so a map link opens on the same provider; it survives Table↔Map tab switches alongside the existing filters
+- Each provider loads as its own lazy chunk, so opening the map downloads only the selected one and neither is in the initial bundle
+- Google Maps requires `GOOGLE_MAPS_API_KEY` (see README); without it the Google option renders disabled with an explanatory tooltip and OpenStreetMap continues to work. OpenStreetMap stays the default so Google's billed map loads remain opt-in
+
+### Improvements
+- Widened the `.gitignore` env pattern to `.env*` (keeping `.env.example` tracked) so a local `frontend/.env.local` holding an API key can no longer be committed
+
 ## 2026-07-22
 
 ### Features

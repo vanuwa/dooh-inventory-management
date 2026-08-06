@@ -102,18 +102,21 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 | `components/BulkUploadJobsTab.jsx` | Jobs grid with per-task detail modal + file upload |
 | `components/PublisherUsersTab.jsx` | Publisher users grid |
 | `components/PaginationControls.jsx` | Shared pagination controls |
+| `components/ScreenMap.jsx` | DOOH map container: fetch, cap/no-coords banners, dynamic height, basemap switcher |
+| `components/map/` | Per-provider map bodies (`LeafletScreenMap`, `GoogleScreenMap`) + shared `ScreenPopupContent` |
 | `hooks/` | `useDebounce`, `useReportTab`, `useRecentActivity`, `useVersionCheck` |
 | `styles/` | Shared inline-style objects (`tables.js`, `tabs.js`) — not CSS files |
 | `utils/dateUtils.js`, `constants/pageTypes.js` | Date helpers, page-type badge constants |
 
 ### Key Implementation Details
 
-- **No CSS files** — all styling is inline style objects in JSX (shared ones in `src/styles/`). Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg). Exception: third-party components may require their own stylesheets — e.g. `ScreenMap.jsx` imports Leaflet/markercluster CSS, which the map cannot render without. Vendor CSS imports are allowed; app styling stays inline.
+- **No CSS files** — all styling is inline style objects in JSX (shared ones in `src/styles/`). Consistent palette: `#1a1a2e` (dark nav), `#f0f2f5` (page bg). Exception: third-party components may require their own stylesheets — e.g. `map/LeafletScreenMap.jsx` imports Leaflet/markercluster CSS, which the map cannot render without. Vendor CSS imports are allowed; app styling stays inline.
 - **Tabs and modals are URL-reflected:** tabs are routes (e.g. `/publishers/:id/users`, `.../placements/:placementId/screens`); the screens modal uses a `?screen={id}` search param so screen URLs are shareable.
 - **Server-side pagination everywhere:** publishers, publisher placements, and screens all paginate/search upstream. Search inputs are debounced 300ms (`useDebounce`).
 - **Abort signals:** async fetch operations use `AbortController` to cancel in-flight requests on unmount.
 - **Report polling:** CSV generation polls `/report/status` every 2 seconds, up to 60 attempts, until `status_name === 'FINISHED_OK'`.
 - **Version check:** `useVersionCheck` compares `VITE_GIT_COMMIT` (baked in at Docker build from the Makefile) against the latest commit on `VITE_GIT_BRANCH` via the GitHub API every 5 minutes; Layout shows an update banner when outdated.
+- **DOOH map basemaps:** the map tab supports two providers, selected by a switcher and persisted via `?mapProvider=` + localStorage (`osm` is the default so Google's billed map loads stay opt-in). All provider config lives in `constants/mapConfig.js`; each provider body is lazy-loaded so only the chosen one's chunk downloads. Google Maps needs `VITE_GOOGLE_MAPS_API_KEY` (baked in at Docker build) and a Map ID (`VITE_GOOGLE_MAPS_MAP_ID`, defaults to `DEMO_MAP_ID`) — without a key the Google option renders disabled. Google markers are built imperatively and handed to `MarkerClusterer` rather than rendered as React elements, to avoid reconciling thousands of components.
 - **Copy VAST Tag:** built client-side as `https://ad.360yield.com/{publisher_id}/advast?p={placement_id}&player_id=...&dooh_multiplier=1`; disabled when the screen has no `player_id`.
 - **Upstream API typo:** The SSP API returns `totalNumberOfElemements` (missing an 's'). `resolveTotal` in `handlers/` handles both spellings and falls back to the `X-360-Content-Range` header.
 - **Pagination defaults:** 20 items per page, max 100. Offset = `(page - 1) * limit`.
