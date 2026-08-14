@@ -9,6 +9,7 @@ export const tableStyles = {
   td: _td,
   tdCompact: { ..._td, fontSize: '0.875rem', whiteSpace: 'nowrap' },
   rowAlt: { background: '#fafafa' },
+  select: { padding: '0.4375rem 0.75rem', border: '1px solid #d1d5db', borderRadius: 4, fontSize: '0.875rem', color: '#111827', background: '#fff', cursor: 'pointer' },
   pagination: { display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' },
   pageBtn: { padding: '0.375rem 0.875rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem' },
   pageInfo: { fontSize: '0.875rem', color: '#6b7280' },

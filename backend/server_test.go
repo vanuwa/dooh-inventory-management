@@ -293,7 +293,7 @@ const (
 	mockPublisherListBody    = `{"publishers":[{"id":42,"name":"Pub One","active":true,"business_unit_name":"Test BU","seller_type":"PUBLISHER","azerion_owned":false}],"totalNumberOfElemements":1}`
 	mockPublisherItemBody    = `{"id":42,"name":"Pub One"}`
 	mockPubPlacementsBody    = `{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"type":"display"},{"id":102,"name":"Screen B","placement_status":false,"type":"video"}]}`
-	mockDoohSettingsBody     = `{"dooh_settings":[{"id":1,"player_id":"PL-001","device_id":"DEV-001","orientation":"LANDSCAPE","resolution_width":1920,"resolution_height":1080,"country_code":"NL","city":"Amsterdam","cpm":5.0,"currency_code":"EUR"}],"totalNumberOfElemements":1}`
+	mockDoohSettingsBody     = `{"dooh_settings":[{"id":1,"player_id":"PL-001","status":"active","device_id":"DEV-001","orientation":"LANDSCAPE","resolution_width":1920,"resolution_height":1080,"country_code":"NL","city":"Amsterdam","cpm":5.0,"currency_code":"EUR"}],"totalNumberOfElemements":1}`
 	mockReportPreviewBody    = `{"column_order":[{"id":"day","display":"Day"},{"id":"impressions","display":"Impressions"}],"rows":[{"day":"2026-05-20","impressions":"5000"}]}`
 	mockGenerationStatusBody = `{"report_generation_id":"abc123","status_name":"FINISHED_OK","report_download_url":"https://cdn.example.com/report.csv"}`
 )
@@ -557,6 +557,9 @@ func TestPlacementDoohSettings_Success(t *testing.T) {
 	if body.Page != 1 {
 		t.Errorf("page: want 1, got %d", body.Page)
 	}
+	if got := body.DoohSettings[0]["status"]; got != "active" {
+		t.Errorf("status: want %q, got %v", "active", got)
+	}
 }
 
 func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
@@ -573,6 +576,33 @@ func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
 	app := appServer(t, upstream.URL)
 
 	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings?search=Amsterdam", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestPlacementDoohSettings_StatusPassthrough(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("status"); got != "inactive" {
+				t.Errorf("status: want %q, got %q", "inactive", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockDoohSettingsBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings?status=inactive", nil)
 	req.Header.Set("X-Access-Token", "mock-access-token")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -704,6 +734,50 @@ func TestPostPlacementDoohSettings_Success(t *testing.T) {
 	}
 	if id := body.DoohSettings[0]["id"]; id != float64(999) {
 		t.Errorf("id: want 999, got %v", id)
+	}
+}
+
+func TestPutPlacementDoohSettings_Success(t *testing.T) {
+	const reqBody = `{"dooh_settings":[{"id":999,"status":"inactive"}]}`
+	const respBody = `{"dooh_settings":[{"id":999,"status":"inactive"}]}`
+
+	var gotMethod string
+	var gotBody []byte
+	var gotToken string
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotToken = r.Header.Get("Authorization")
+			gotBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(respBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101/dooh-settings", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("upstream method: want PUT, got %s", gotMethod)
+	}
+	if gotToken != "Bearer mock-access-token" {
+		t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", gotToken)
+	}
+	if !bytes.Equal(gotBody, []byte(reqBody)) {
+		t.Errorf("body forwarded: want %s, got %s", reqBody, gotBody)
 	}
 }
 

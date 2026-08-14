@@ -81,6 +81,7 @@ type PlacementDoohItem struct {
 	PublisherID       int64    `json:"publisher_id"`
 	PlacementID       int64    `json:"placement_id"`
 	PlayerID          string   `json:"player_id"`
+	Status            string   `json:"status"`
 	DeviceID          string   `json:"device_id"`
 	ScreenImgURL      string   `json:"screen_img_url"`
 	Orientation       string   `json:"orientation"`
@@ -400,6 +401,9 @@ func (h *PublishersHandler) GetPlacementDoohSettings(w http.ResponseWriter, r *h
 	}
 	if sort := r.URL.Query().Get("sort"); sort != "" {
 		params.Set("sort", sort)
+	}
+	if status := r.URL.Query().Get("status"); status != "" {
+		params.Set("status", status)
 	}
 
 	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath+"?"+params.Encode(), accessToken, nil, "")

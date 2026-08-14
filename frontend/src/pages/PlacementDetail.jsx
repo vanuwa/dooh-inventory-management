@@ -16,6 +16,7 @@ const SCREEN_FIELDS = [
   ['Publisher ID',        'publisher_id',        false, undefined, false],
   ['Placement ID',        'placement_id',        false, undefined, false],
   ['Player ID',           'player_id',           true,  'text',   true],
+  ['Status',              'status',              true,  'text',   false],
   ['Device ID',           'device_id',           true,  'text',   false],
   ['Screen Image URL',    'screen_img_url',      true,  'text',   false],
   ['Orientation',         'orientation',         true,  'text',   false],
@@ -57,6 +58,7 @@ const FIELD_HELP = {
 
 const FIELD_OPTIONS = {
   orientation: ['', 'landscape', 'portrait', 'square'],
+  status: ['active', 'inactive'],
 }
 
 function coerceTypes(vals) {
@@ -96,6 +98,7 @@ export default function PlacementDetail() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const committedSearch = useDebounce(search, 300)
+  const [statusFilter, setStatusFilter] = useState('active')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const limit = 20
@@ -159,7 +162,7 @@ export default function PlacementDetail() {
     return () => controller.abort()
   }, [publisherId, placementId])
 
-  useEffect(() => { setPage(1) }, [committedSearch])
+  useEffect(() => { setPage(1) }, [committedSearch, statusFilter])
 
   const initialScreenId = searchParams.get('screen')
 
@@ -175,6 +178,7 @@ export default function PlacementDetail() {
         setEditValues({
           publisher_id: publisherId,
           placement_id: placementId,
+          status: 'active',
           venue_type_tax: 'OpenOOH Venue Taxonomy 1.1',
           allowed_content: 'VIDEO',
           resolution_width: 1920,
@@ -208,15 +212,20 @@ export default function PlacementDetail() {
     return () => { if (copiedVastTimerRef.current) clearTimeout(copiedVastTimerRef.current) }
   }, [selectedScreen])
 
+  function screensPath(forPage, forLimit) {
+    let path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${forPage}&limit=${forLimit}`
+    if (committedSearch) path += `&search=${encodeURIComponent(committedSearch)}`
+    if (statusFilter) path += `&status=${statusFilter}`
+    return path
+  }
+
   useEffect(() => {
     if (activeTab !== 'screens') return
     setLoading(true)
     setError('')
-    let path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${page}&limit=${limit}`
-    if (committedSearch) path += `&search=${encodeURIComponent(committedSearch)}`
 
     const controller = new AbortController()
-    apiFetch(path, { signal: controller.signal })
+    apiFetch(screensPath(page, limit), { signal: controller.signal })
       .then(res => res.json())
       .then(data => {
         setDoohSettings(data.dooh_settings ?? [])
@@ -232,7 +241,7 @@ export default function PlacementDetail() {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [publisherId, placementId, page, committedSearch, activeTab, screensTick])
+  }, [publisherId, placementId, page, committedSearch, statusFilter, activeTab, screensTick])
 
   const totalPages = Math.ceil(total / limit)
 
@@ -249,13 +258,13 @@ export default function PlacementDetail() {
       let p = 1
       let total = Infinity
       while (all.length < total) {
-        const res = await apiFetch(`/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${p}&limit=100`)
+        const res = await apiFetch(screensPath(p, 100))
         const data = await res.json()
         all.push(...(data.dooh_settings ?? []))
         total = data.total ?? all.length
         p++
       }
-      const cols = ['id', 'publisher_id', 'placement_id', 'player_id', 'device_id', 'screen_img_url', 'orientation', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax', 'lat', 'lon', 'country_code', 'region', 'city', 'zip', 'address', 'width', 'height', 'min_duration', 'max_duration', 'avg_weekly_audience', 'cpm', 'currency_code', 'allowed_content']
+      const cols = ['id', 'publisher_id', 'placement_id', 'player_id', 'status', 'device_id', 'screen_img_url', 'orientation', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax', 'lat', 'lon', 'country_code', 'region', 'city', 'zip', 'address', 'width', 'height', 'min_duration', 'max_duration', 'avg_weekly_audience', 'cpm', 'currency_code', 'allowed_content']
       const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
       const csv = [cols.join(','), ...all.map(row => cols.map(c => esc(row[c])).join(','))].join('\n')
       const now = new Date()
@@ -481,6 +490,11 @@ export default function PlacementDetail() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
+              <select style={s.select} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <option value="">All</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
               <button style={s.createBtn} onClick={() => setSearchParams({ screen: 'new' }, { replace: true })}>
                 + Create Screen
               </button>
@@ -506,6 +520,7 @@ export default function PlacementDetail() {
                       <tr>
                         <th style={s.th}>ID</th>
                         <th style={s.th}>Player ID</th>
+                        <th style={s.th}>Status</th>
                         <th style={s.th}>Device ID</th>
                         <th style={s.th}>Orientation</th>
                         <th style={s.th}>Resolution</th>
@@ -552,6 +567,7 @@ export default function PlacementDetail() {
                           >
                             <td style={s.td}><span style={s.idTag}>{sc.id}</span></td>
                             <td style={s.td}>{fmt(sc.player_id)}</td>
+                            <td style={s.td}><StatusBadge active={sc.status === 'active'} /></td>
                             <td style={s.td}>{fmt(sc.device_id)}</td>
                             <td style={s.td}>{fmt(sc.orientation)}</td>
                             <td style={s.td}>{resolution}</td>

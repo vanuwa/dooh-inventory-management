@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-14
+
+### Features
+- Added a **Status** column (Active/Inactive) to the Screens grid, backed by the upstream `dooh-settings` API's new `status` field
+- Create Screen form defaults new screens to Active; the Status dropdown (Active/Inactive) is editable on both create and edit
+- Added a Status filter (All, Active only, Inactive only) to the Screens grid, defaulting to "Active only"
+- CSV export from the Screens grid now respects the current search and status filters instead of exporting every screen
+
 ## 2026-08-06
 
 ### Features
