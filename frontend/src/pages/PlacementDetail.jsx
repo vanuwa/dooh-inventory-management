@@ -111,6 +111,7 @@ export default function PlacementDetail() {
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState(() => new Map())
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const headerCbRef = useRef(null)
 
   const [editPlacementOpen, setEditPlacementOpen] = useState(false)
 
@@ -278,6 +279,13 @@ export default function PlacementDetail() {
       return next
     })
   }
+
+  const pageAllSelected = doohSettings.length > 0 && doohSettings.every(sc => selected.has(sc.id))
+  const pageSomeSelected = doohSettings.some(sc => selected.has(sc.id))
+
+  useEffect(() => {
+    if (headerCbRef.current) headerCbRef.current.indeterminate = pageSomeSelected && !pageAllSelected
+  }, [selected, doohSettings])
 
   function fmt(v, fallback = '—') {
     return v || fallback
@@ -576,6 +584,16 @@ export default function PlacementDetail() {
                   <table style={s.table}>
                     <thead>
                       <tr>
+                        {selectMode && (
+                          <th style={s.th}>
+                            <input
+                              type="checkbox"
+                              ref={headerCbRef}
+                              checked={pageAllSelected}
+                              onChange={togglePageSelection}
+                            />
+                          </th>
+                        )}
                         <th style={s.th}>ID</th>
                         <th style={s.th}>Player ID</th>
                         <th style={s.th}>Status</th>
@@ -621,8 +639,17 @@ export default function PlacementDetail() {
                             onClick={() => { setSelectedScreen(sc); setEditMode(false); setSearchParams({ screen: String(sc.id) }, { replace: true }) }}
                             onMouseEnter={() => setHoveredScreenId(sc.id)}
                             onMouseLeave={() => setHoveredScreenId(null)}
-                            style={{ cursor: 'pointer', background: hoveredScreenId === sc.id ? '#e8edf2' : (i % 2 !== 0 ? '#fafafa' : undefined) }}
+                            style={{ cursor: 'pointer', background: hoveredScreenId === sc.id ? '#e8edf2' : (selected.has(sc.id) ? '#e6f0fa' : (i % 2 !== 0 ? '#fafafa' : undefined)) }}
                           >
+                            {selectMode && (
+                              <td style={s.td} onClick={e => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected.has(sc.id)}
+                                  onChange={() => toggleSelected(sc)}
+                                />
+                              </td>
+                            )}
                             <td style={s.td}><span style={s.idTag}>{sc.id}</span></td>
                             <td style={s.td}>{fmt(sc.player_id)}</td>
                             <td style={s.td}><StatusBadge active={sc.status === 'active'} /></td>
