@@ -6,6 +6,7 @@ import Layout from '../components/Layout.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import EditPlacementModal from '../components/EditPlacementModal.jsx'
+import DeleteScreensModal from '../components/DeleteScreensModal.jsx'
 import PaginationControls from '../components/PaginationControls.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
@@ -278,6 +279,17 @@ export default function PlacementDetail() {
       }
       return next
     })
+  }
+
+  function handleDeleted(ids) {
+    setSelected(prev => {
+      const next = new Map(prev)
+      for (const id of ids) next.delete(id)
+      return next
+    })
+    setDeleteConfirmOpen(false)
+    if (page !== 1) setPage(1)
+    else setScreensTick(t => t + 1)
   }
 
   const pageAllSelected = doohSettings.length > 0 && doohSettings.every(sc => selected.has(sc.id))
@@ -678,6 +690,17 @@ export default function PlacementDetail() {
               </>
             )}
           </>
+        )}
+
+        {deleteConfirmOpen && (
+          <DeleteScreensModal
+            screens={[...selected.values()]}
+            publisherId={publisherId}
+            placementId={placementId}
+            publisherName={publisherName}
+            onCancel={() => setDeleteConfirmOpen(false)}
+            onDeleted={handleDeleted}
+          />
         )}
 
         {(selectedScreen || createMode) && (
