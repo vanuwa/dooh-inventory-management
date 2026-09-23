@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -1143,10 +1144,13 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	writeProxyResponse(w, plStatus, plResp, plHeaders)
 }
 
-func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Request, method string) {
+func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Request, method, query string) {
 	placementID := url.PathEscape(r.PathValue("placementId"))
 	accessToken := r.Header.Get("X-Access-Token")
 	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings", placementID)
+	if query != "" {
+		upstreamPath += "?" + query
+	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -1162,9 +1166,22 @@ func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Req
 }
 
 func (h *PublishersHandler) PutPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
-	h.proxyDoohSettings(w, r, http.MethodPut)
+	h.proxyDoohSettings(w, r, http.MethodPut, "")
 }
 
 func (h *PublishersHandler) PostPlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
-	h.proxyDoohSettings(w, r, http.MethodPost)
+	h.proxyDoohSettings(w, r, http.MethodPost, "")
+}
+
+// doohIDsPattern matches the comma-separated numeric id selector accepted by the upstream
+// bulk delete endpoint.
+var doohIDsPattern = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
+
+func (h *PublishersHandler) DeletePlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
+	ids := r.URL.Query().Get("ids")
+	if !doohIDsPattern.MatchString(ids) {
+		writeErrorJSON(w, http.StatusBadRequest, "ids must be a comma-separated list of numeric screen ids")
+		return
+	}
+	h.proxyDoohSettings(w, r, http.MethodDelete, "ids="+ids)
 }

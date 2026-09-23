@@ -43,6 +43,7 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.GetPlacementDoohSettings)
 	mux.HandleFunc("PUT /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PutPlacementDoohSettings)
 	mux.HandleFunc("POST /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.PostPlacementDoohSettings)
+	mux.HandleFunc("DELETE /api/publishers/{publisherId}/placements/{placementId}/dooh-settings", publishersHandler.DeletePlacementDoohSettings)
 	mux.HandleFunc("POST /api/report/placement/{publisherId}/{placementId}", reportHandler.PlacementReport)
 	mux.HandleFunc("POST /api/report/generate/placement/{publisherId}/{placementId}", reportHandler.GeneratePlacementReport)
 	mux.HandleFunc("GET /api/report/status/{reportGenerationId}", reportHandler.PlacementReportStatus)
@@ -108,7 +109,7 @@ func writeAllowed(path string) bool {
 func corsMiddleware(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token")
 
 		if r.Method == http.MethodOptions {

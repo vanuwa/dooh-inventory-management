@@ -750,6 +750,9 @@ func TestPutPlacementDoohSettings_Success(t *testing.T) {
 			gotMethod = r.Method
 			gotToken = r.Header.Get("Authorization")
 			gotBody, _ = io.ReadAll(r.Body)
+			if r.URL.RawQuery != "" {
+				t.Errorf("upstream query: want empty, got %q", r.URL.RawQuery)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(respBody))
 		},
@@ -778,6 +781,124 @@ func TestPutPlacementDoohSettings_Success(t *testing.T) {
 	}
 	if !bytes.Equal(gotBody, []byte(reqBody)) {
 		t.Errorf("body forwarded: want %s, got %s", reqBody, gotBody)
+	}
+}
+
+func TestDeletePlacementDoohSettings_Success(t *testing.T) {
+	const respBody = `{"dooh_settings":[{"id":1,"player_id":"p1"},{"id":2,"player_id":"p2"}]}`
+
+	var gotMethod, gotQuery, gotToken string
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotQuery = r.URL.RawQuery
+			gotToken = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(respBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=1,2", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("upstream method: want DELETE, got %s", gotMethod)
+	}
+	if gotQuery != "ids=1,2" {
+		t.Errorf("upstream query: want %q, got %q", "ids=1,2", gotQuery)
+	}
+	if gotToken != "Bearer mock-access-token" {
+		t.Errorf("Authorization: want %q, got %q", "Bearer mock-access-token", gotToken)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	if string(got) != respBody {
+		t.Errorf("body: want %s, got %s", respBody, got)
+	}
+}
+
+func TestDeletePlacementDoohSettings_ProxiesUpstreamError(t *testing.T) {
+	const errBody = `{"type":"ValidationException","messages":[{"error_code":"placement.dooh.unknown","property_name":"ids","description":"Unknown dooh setting id 7"}]}`
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(errBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=7", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", resp.StatusCode)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	if string(got) != errBody {
+		t.Errorf("body: want %s, got %s", errBody, got)
+	}
+}
+
+func TestDeletePlacementDoohSettings_RejectsInvalidIds(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{"missing", ""},
+		{"empty", "?ids="},
+		{"non-numeric", "?ids=abc"},
+		{"empty element", "?ids=1,,2"},
+		{"wrong separator", "?ids=1;2"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+					called = true
+					w.Write([]byte(`{}`))
+				},
+			})
+
+			app := appServer(t, upstream.URL)
+
+			req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings"+tc.query, nil)
+			req.Header.Set("X-Access-Token", "mock-access-token")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status: want 400, got %d", resp.StatusCode)
+			}
+			if called {
+				t.Error("upstream was called for an invalid ids selector")
+			}
+		})
 	}
 }
 
