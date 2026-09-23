@@ -107,6 +107,11 @@ export default function PlacementDetail() {
   const screensCsvInFlightRef = useRef(false)
   const [screensTick, setScreensTick] = useState(0)
 
+  // screens selection mode
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState(() => new Map())
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+
   const [editPlacementOpen, setEditPlacementOpen] = useState(false)
 
   // screen detail modal
@@ -245,6 +250,34 @@ export default function PlacementDetail() {
   }, [publisherId, placementId, page, committedSearch, statusFilter, activeTab, screensTick])
 
   const totalPages = Math.ceil(total / limit)
+
+  useEffect(() => {
+    if (activeTab === 'screens') return
+    setSelectMode(false)
+    setSelected(new Map())
+    setDeleteConfirmOpen(false)
+  }, [activeTab])
+
+  function toggleSelected(sc) {
+    setSelected(prev => {
+      const next = new Map(prev)
+      if (next.has(sc.id)) next.delete(sc.id)
+      else next.set(sc.id, sc)
+      return next
+    })
+  }
+
+  function togglePageSelection() {
+    setSelected(prev => {
+      const next = new Map(prev)
+      const allSelected = doohSettings.length > 0 && doohSettings.every(sc => next.has(sc.id))
+      for (const sc of doohSettings) {
+        if (allSelected) next.delete(sc.id)
+        else next.set(sc.id, sc)
+      }
+      return next
+    })
+  }
 
   function fmt(v, fallback = '—') {
     return v || fallback
@@ -495,16 +528,41 @@ export default function PlacementDetail() {
                 <option value="active">Active only</option>
                 <option value="inactive">Inactive only</option>
               </select>
-              <button style={s.createBtn} onClick={() => setSearchParams({ screen: 'new' }, { replace: true })}>
+              <button
+                style={s.selectBtn}
+                onClick={() => {
+                  if (selectMode) { setSelectMode(false); setSelected(new Map()) }
+                  else setSelectMode(true)
+                }}
+              >
+                {selectMode ? 'Done' : 'Select'}
+              </button>
+              {selectMode && (
+                <button
+                  style={selected.size === 0 ? s_deleteBtnDisabled : s.deleteBtn}
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  disabled={selected.size === 0}
+                >
+                  Delete ({selected.size})
+                </button>
+              )}
+              <button style={s.createBtn} onClick={() => setSearchParams({ screen: 'new' }, { replace: true })} disabled={selectMode}>
                 + Create Screen
               </button>
-              <button style={s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading}>
+              <button style={s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading || selectMode}>
                 {screensCsvLoading ? <><span style={s.spinnerSm} />Downloading…</> : 'Download CSV'}
               </button>
-              <button style={s.refreshBtn} onClick={() => setScreensTick(t => t + 1)} disabled={loading}>
+              <button style={s.refreshBtn} onClick={() => setScreensTick(t => t + 1)} disabled={loading || selectMode}>
                 Refresh
               </button>
             </div>
+
+            {selectMode && selected.size > 0 && (
+              <div style={s.selectionSummary}>
+                <span>{selected.size} screen{selected.size === 1 ? '' : 's'} selected across pages</span>
+                <button style={s.clearLink} onClick={() => setSelected(new Map())}>Clear</button>
+              </div>
+            )}
 
             {loading && <p style={s.muted}>Loading screens…</p>}
 
@@ -740,6 +798,10 @@ const s = {
   createBtn: { padding: '0.4375rem 1rem', background: '#2f855a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   csvBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', display: 'inline-flex', alignItems: 'center', gap: '0.375rem' },
   refreshBtn: { padding: '0.375rem 0.75rem', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.8125rem', marginLeft: 'auto' },
+  selectBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
+  deleteBtn: { padding: '0.4375rem 1rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
+  selectionSummary: { display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '-0.5rem 0 1rem', fontSize: '0.8125rem', color: '#374151' },
+  clearLink: { background: 'none', border: 'none', padding: 0, color: '#4338ca', fontSize: '0.8125rem', cursor: 'pointer', textDecoration: 'underline' },
   spinnerSm: { display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(26,26,46,0.2)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 },
 
   idTag: { color: '#6b7280', fontWeight: 400 },
@@ -768,3 +830,5 @@ const s = {
 }
 
 const s_editInputError = { ...s.editInput, borderColor: '#e53e3e', outline: '1px solid #e53e3e' }
+
+const s_deleteBtnDisabled = { ...s.deleteBtn, background: '#fca5a5', cursor: 'not-allowed' }
