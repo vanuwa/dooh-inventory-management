@@ -10,6 +10,7 @@ import PaginationControls from '../components/PaginationControls.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
+import { formatApiError } from '../utils/formatApiError.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -346,8 +347,7 @@ export default function PlacementDetail() {
       )
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
-        const detail = Array.isArray(errData.errors) ? ` — ${errData.errors.join(', ')}` : ''
-        setSaveError((errData.message ?? `Create failed (${res.status})`) + detail)
+        setSaveError(formatApiError(errData, `Create failed (${res.status})`))
         return
       }
       setScreensTick(t => t + 1)
@@ -384,7 +384,7 @@ export default function PlacementDetail() {
       )
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
-        setSaveError(errData.message ?? `Save failed (${res.status})`)
+        setSaveError(formatApiError(errData, `Save failed (${res.status})`))
         return
       }
       setDoohSettings(prev => prev.map(sc => sc.id === updated.id ? updated : sc))
@@ -762,7 +762,7 @@ const s = {
   modalFooter: { display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem', flexShrink: 0 },
   primaryBtn: { padding: '0.4375rem 1.25rem', background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   cancelBtn: { padding: '0.4375rem 1.25rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem' },
-  saveError: { color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.5rem', flexShrink: 0 },
+  saveError: { color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.5rem', flexShrink: 0, whiteSpace: 'pre-line' },
   helpIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', border: '1px solid #aaa', fontSize: 10, cursor: 'pointer', background: '#f0f2f5', padding: 0, verticalAlign: 'middle', lineHeight: 1 },
   helpPopover: { position: 'absolute', zIndex: 100, background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '8px 10px', width: 260, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', top: 22, left: 0, fontSize: '0.8125rem', lineHeight: 1.4 },
 }
