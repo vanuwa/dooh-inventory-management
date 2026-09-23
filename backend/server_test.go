@@ -835,10 +835,13 @@ func TestDeletePlacementDoohSettings_Success(t *testing.T) {
 	}
 }
 
+// testDoohIDsLimit must track handlers.doohIDsLimit, which is unexported.
+const testDoohIDsLimit = 1000
+
 // maxDoohSelector builds the largest selector the UI can send: doohIDsLimit ids at the
 // widest id width seen in production (8 digits).
 func maxDoohSelector() string {
-	ids := make([]string, 1000)
+	ids := make([]string, testDoohIDsLimit)
 	for i := range ids {
 		ids[i] = strconv.Itoa(10000000 + i)
 	}
@@ -856,9 +859,8 @@ var nginxHeaderBufferPattern = regexp.MustCompile(`large_client_header_buffers\s
 // TestNginxAllowsMaxDoohSelector guards the one hop this repo controls: the selector
 // travels in the request line, so the bundled nginx must be configured with a
 // large_client_header_buffers size that fits the worst case (its 8k default would answer
-// 414 before the request ever reached Go). The other hops are already clear — Go's
-// DefaultMaxHeaderBytes is 1 MB, and the upstream inventory service sets
-// server.max-http-request-header-size: 1048576 — see the doohIDsLimit comment.
+// 414 before the request ever reached Go). The other hops already fit it — see the
+// request-line budget in CLAUDE.md.
 //
 // frontend/nginx.conf is installed as /etc/nginx/conf.d/default.conf, which the stock
 // image includes inside the http block, so the directive can only live in server context.
@@ -975,7 +977,7 @@ func TestDeletePlacementDoohSettings_ProxiesUpstreamError(t *testing.T) {
 }
 
 func TestDeletePlacementDoohSettings_RejectsInvalidIds(t *testing.T) {
-	tooMany := make([]string, 1001)
+	tooMany := make([]string, testDoohIDsLimit+1)
 	for i := range tooMany {
 		tooMany[i] = strconv.Itoa(i + 1)
 	}

@@ -310,8 +310,9 @@ export default function PlacementDetail() {
 
   useEffect(() => {
     if (headerCbRef.current) headerCbRef.current.indeterminate = pageSomeSelected && !pageAllSelected
-    // doohSettings is a dep because the header <th> unmounts while loading and a fresh
-    // checkbox (indeterminate === false) mounts on every page/search/filter change.
+    // doohSettings and selectMode are deps because the header <th> unmounts while loading
+    // and when select mode is off, so a fresh checkbox (indeterminate === false) mounts on
+    // every page/search/filter change and every time select mode is turned back on.
   }, [pageSomeSelected, pageAllSelected, selectMode, doohSettings])
 
   function fmt(v, fallback = '—') {
@@ -720,7 +721,7 @@ export default function PlacementDetail() {
             publisherId={publisherId}
             placementId={placementId}
             publisherName={publisherName}
-            onCancel={() => setDeleteConfirmOpen(false)}
+            onClose={() => setDeleteConfirmOpen(false)}
             onDeleted={handleDeleted}
           />
         )}

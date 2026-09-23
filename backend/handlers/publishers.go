@@ -1183,24 +1183,10 @@ func (h *PublishersHandler) PostPlacementDoohSettings(w http.ResponseWriter, r *
 // bulk delete endpoint.
 var doohIDsPattern = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
 
-// doohIDsLimit mirrors the upstream placement.dooh.delete.selector.limit
-// (PlacementDoohsDto.MAX_ITEMS in 360yield-api-inventory) so an oversized selector is
-// rejected here with a readable message instead of upstream or the gateway.
-//
-// The selector travels in the request line, so every hop must accept it. Worst case
-// budget, at the widest id width seen in production (8 digits):
-//
-//	"DELETE " (7) + "/api/publishers/999999/placements/9999999/dooh-settings" (55) +
-//	"?ids=" (5) + 1000*8 digits + 999 commas (8999) + " HTTP/1.1" (9) = 9075 bytes
-//
-// Hops, verified:
-//   - nginx (frontend/nginx.conf): default large_client_header_buffers is 8k, which would
-//     414 the request, so it is raised to 16k (see TestNginxAllowsMaxDoohSelector).
-//   - Go net/http: DefaultMaxHeaderBytes is 1 MB, well clear of the budget.
-//   - upstream Tomcat: 360yield-api-inventory sets server.max-http-request-header-size:
-//     1048576 in config/application.yaml, so Tomcat's 8192-byte default does not apply.
-//     (Spring Boot 3 renamed max-http-header-size to max-http-request-header-size —
-//     grepping for the old name finds nothing and is not evidence the limit is unset.)
+// doohIDsLimit mirrors the upstream selector limit (PlacementDoohsDto.MAX_ITEMS in
+// 360yield-api-inventory) so an oversized selector is rejected here with a readable
+// message instead of upstream or the gateway. The ids travel in the request line, so
+// every hop must accept it — see the per-hop budget in CLAUDE.md.
 const doohIDsLimit = 1000
 
 func (h *PublishersHandler) DeletePlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
