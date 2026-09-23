@@ -4,10 +4,10 @@
 
 ### Features
 - Screens can now be deleted from the placement Screens tab: a **Select** toggle turns on a checkbox column and a red **Delete (N)** button, backed by the inventory API's admin-only bulk delete endpoint
-- Selection persists across pages, searches and status-filter changes, so screens from several pages can be collected into one deletion; a summary line shows the running count with a **Clear** link
+- Selection persists across pages, searches and status-filter changes, so screens from several pages can be collected into one deletion; a summary line shows the running count with a **Clear** link, and the selection stops at 1000 screens (the upstream per-request limit) with a note in that line
 - Confirming opens a wide dialog listing every selected screen (ID, Player ID, Status, Placement ID, Publisher, Country) with a checkbox per row, so individual screens can be unticked before deleting
 - Upstream validation failures (unknown id, concurrent delete, 404) and a 403 for non-admin users are shown inside the dialog with the upstream wording, and the dialog stays open so the selection can be adjusted and retried
-- After a successful delete the grid refetches from page 1 and select mode stays on until **Done**; new backend route `DELETE /api/publishers/{publisherId}/placements/{placementId}/dooh-settings?ids=...` validates the id list before forwarding it upstream verbatim
+- After a successful delete the grid refetches from page 1 and select mode stays on until **Done**; new backend route `DELETE /api/publishers/{publisherId}/placements/{placementId}/dooh-settings?ids=...` validates the id list (numeric CSV, max 1000) before forwarding it upstream verbatim, and nginx's request-line buffer was raised so a full 1000-id selector is not rejected with a 414
 
 ### Improvements
 - Screen save and create errors now show the upstream validation text (`property: description`, one line per message) instead of collapsing everything into a generic "Save failed (400)"; the parsing lives in a shared `formatApiError` helper

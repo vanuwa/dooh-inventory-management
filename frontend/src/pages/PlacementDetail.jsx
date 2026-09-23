@@ -80,6 +80,11 @@ function coerceTypes(vals) {
   return out
 }
 
+// Mirrors the upstream placement.dooh.delete.selector.limit (PlacementDoohsDto.MAX_ITEMS),
+// which the Go proxy also enforces. Selection stops here rather than at the confirmation
+// dialog, so the user can never build a selection the delete would refuse.
+const MAX_DELETE_IDS = 1000
+
 export default function PlacementDetail() {
   const { publisherId, placementId } = useParams()
   const location = useLocation()
@@ -253,18 +258,23 @@ export default function PlacementDetail() {
 
   const totalPages = Math.ceil(total / limit)
 
+  // Selection is scoped to one placement's screens. React Router renders the same
+  // PlacementDetail element for all three routes, so it is not remounted when only the
+  // path params change — reset on publisher/placement navigation as well as on tab change,
+  // or a confirmed delete could list the previous placement's screens.
   useEffect(() => {
-    if (activeTab === 'screens') return
     setSelectMode(false)
     setSelected(new Map())
     setDeleteConfirmOpen(false)
-  }, [activeTab])
+  }, [activeTab, publisherId, placementId])
 
+  // The delete is capped at MAX_DELETE_IDS, so selection stops there rather than letting
+  // the user build a selection the confirmation dialog would refuse to act on.
   function toggleSelected(sc) {
     setSelected(prev => {
       const next = new Map(prev)
       if (next.has(sc.id)) next.delete(sc.id)
-      else next.set(sc.id, sc)
+      else if (next.size < MAX_DELETE_IDS) next.set(sc.id, sc)
       return next
     })
   }
@@ -275,7 +285,7 @@ export default function PlacementDetail() {
       const allSelected = doohSettings.length > 0 && doohSettings.every(sc => next.has(sc.id))
       for (const sc of doohSettings) {
         if (allSelected) next.delete(sc.id)
-        else next.set(sc.id, sc)
+        else if (!next.has(sc.id) && next.size < MAX_DELETE_IDS) next.set(sc.id, sc)
       }
       return next
     })
@@ -288,6 +298,9 @@ export default function PlacementDetail() {
       return next
     })
     setDeleteConfirmOpen(false)
+    // Always go back to page 1: selection spans pages, so a delete can empty the current
+    // page or shrink the total below it, and PaginationControls only renders when the page
+    // has rows — the user would be stranded on "No screens found." with no way back.
     if (page !== 1) setPage(1)
     else setScreensTick(t => t + 1)
   }
@@ -297,7 +310,9 @@ export default function PlacementDetail() {
 
   useEffect(() => {
     if (headerCbRef.current) headerCbRef.current.indeterminate = pageSomeSelected && !pageAllSelected
-  }, [selected, doohSettings])
+    // doohSettings is a dep because the header <th> unmounts while loading and a fresh
+    // checkbox (indeterminate === false) mounts on every page/search/filter change.
+  }, [pageSomeSelected, pageAllSelected, selectMode, doohSettings])
 
   function fmt(v, fallback = '—') {
     return v || fallback
@@ -441,6 +456,8 @@ export default function PlacementDetail() {
         return
       }
       setDoohSettings(prev => prev.map(sc => sc.id === updated.id ? updated : sc))
+      // keep the selection snapshot in step, so the delete dialog never lists stale values
+      setSelected(prev => prev.has(updated.id) ? new Map(prev).set(updated.id, updated) : prev)
       setSelectedScreen(updated)
       setEditMode(false)
     } catch (err) {
@@ -566,13 +583,13 @@ export default function PlacementDetail() {
                   Delete ({selected.size})
                 </button>
               )}
-              <button style={s.createBtn} onClick={() => setSearchParams({ screen: 'new' }, { replace: true })} disabled={selectMode}>
+              <button style={selectMode ? s_createBtnDisabled : s.createBtn} onClick={() => setSearchParams({ screen: 'new' }, { replace: true })} disabled={selectMode}>
                 + Create Screen
               </button>
-              <button style={s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading || selectMode}>
+              <button style={screensCsvLoading || selectMode ? s_csvBtnDisabled : s.csvBtn} onClick={downloadScreensCSV} disabled={screensCsvLoading || selectMode}>
                 {screensCsvLoading ? <><span style={s.spinnerSm} />Downloading…</> : 'Download CSV'}
               </button>
-              <button style={s.refreshBtn} onClick={() => setScreensTick(t => t + 1)} disabled={loading || selectMode}>
+              <button style={loading || selectMode ? s_refreshBtnDisabled : s.refreshBtn} onClick={() => setScreensTick(t => t + 1)} disabled={loading || selectMode}>
                 Refresh
               </button>
             </div>
@@ -580,6 +597,9 @@ export default function PlacementDetail() {
             {selectMode && selected.size > 0 && (
               <div style={s.selectionSummary}>
                 <span>{selected.size} screen{selected.size === 1 ? '' : 's'} selected across pages</span>
+                {selected.size >= MAX_DELETE_IDS && (
+                  <span style={s.selectionLimit}>Selection limit reached — {MAX_DELETE_IDS} screens is the most one delete can cover.</span>
+                )}
                 <button style={s.clearLink} onClick={() => setSelected(new Map())}>Clear</button>
               </div>
             )}
@@ -603,6 +623,7 @@ export default function PlacementDetail() {
                               ref={headerCbRef}
                               checked={pageAllSelected}
                               onChange={togglePageSelection}
+                              aria-label="Select all screens on this page"
                             />
                           </th>
                         )}
@@ -659,6 +680,7 @@ export default function PlacementDetail() {
                                   type="checkbox"
                                   checked={selected.has(sc.id)}
                                   onChange={() => toggleSelected(sc)}
+                                  aria-label={`Select screen ${sc.id}`}
                                 />
                               </td>
                             )}
@@ -851,6 +873,7 @@ const s = {
   selectBtn: { padding: '0.4375rem 1rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   deleteBtn: { padding: '0.4375rem 1rem', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem', fontWeight: 500 },
   selectionSummary: { display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '-0.5rem 0 1rem', fontSize: '0.8125rem', color: '#374151' },
+  selectionLimit: { color: '#b45309' },
   clearLink: { background: 'none', border: 'none', padding: 0, color: '#4338ca', fontSize: '0.8125rem', cursor: 'pointer', textDecoration: 'underline' },
   spinnerSm: { display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(26,26,46,0.2)', borderTopColor: '#1a1a2e', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 },
 
@@ -882,3 +905,6 @@ const s = {
 const s_editInputError = { ...s.editInput, borderColor: '#e53e3e', outline: '1px solid #e53e3e' }
 
 const s_deleteBtnDisabled = { ...s.deleteBtn, background: '#fca5a5', cursor: 'not-allowed' }
+const s_createBtnDisabled = { ...s.createBtn, background: '#9ebfae', cursor: 'not-allowed' }
+const s_csvBtnDisabled = { ...s.csvBtn, color: '#9ca3af', cursor: 'not-allowed' }
+const s_refreshBtnDisabled = { ...s.refreshBtn, color: '#9ca3af', cursor: 'not-allowed' }

@@ -28,7 +28,7 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
   - **Users** — list publisher users; create or edit a user (Console/API access types, role presets) via modal
   - **Reporting** — generate and download a CSV performance report for the publisher
 - Placement detail page with two tabs (URL-reflected):
-  - **Screens** — server-side paginated grid; click any row to open a view/edit modal with full screen details; download all screens as CSV
+  - **Screens** — server-side paginated grid; click any row to open a view/edit modal with full screen details; download all screens as CSV; a **Select** mode turns on a checkbox column so screens can be picked across pages/searches (up to 1000 per delete — the selection stops there and says so) and deleted in bulk via a confirmation dialog (admin-only — see Prerequisites)
   - **Reporting** — generate and download a CSV performance report for the placement
 - Automatic token refresh — handled client-side via response headers, sessions stay alive without re-login
 
@@ -51,6 +51,10 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
 
 - Docker and Docker Compose
 - SSP API credentials (`client_id` and `client_secret`)
+- For **bulk screen deletion only**: the logged-in SSP user needs the `ADMINISTRATOR` module, and
+  the role they authenticate with needs a `DELETE` grant on the DOOH settings resource in the
+  360yield gateway. Without either, the confirmation dialog shows a `403` from upstream or the
+  gateway — that is a permissions issue, not a bug. Everything else works with a normal account.
 
 ### 1. Create a `.env` file
 
@@ -151,6 +155,7 @@ make rebuild-ui    # rebuild only the frontend container
 | `GET` | `/api/publishers/{id}/placements` | Paginated placements for a publisher (sorted `-id`) |
 | `POST` | `/api/publishers/{id}/placements` | Create a DOOH placement (orchestrates inventory + zone + placement upstream) |
 | `GET` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Paginated screens for a placement (`page`, `limit`, `search`, `sort`) |
+| `DELETE` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Bulk delete screens (`ids=1,2,3`, validated as a numeric CSV of at most 1000 ids before forwarding; admin-only upstream, all-or-nothing) |
 | `POST` | `/api/report/placement/{publisherId}/{placementId}` | Synchronous report preview (up to 500 rows) |
 | `POST` | `/api/report/generate/placement/{publisherId}/{placementId}` | Start async CSV report generation |
 | `GET` | `/api/report/status/{reportGenerationId}` | Poll generation status until `FINISHED_OK` |
@@ -164,4 +169,4 @@ make rebuild-ui    # rebuild only the frontend container
 | `POST` | `/api/report/publisher/{publisherId}` | Synchronous publisher report preview |
 | `POST` | `/api/report/generate/publisher/{publisherId}` | Start async publisher CSV report generation |
 
-Write-capable endpoints (all others are read-only, non-GET returns 405): auth, placement creation, user create/update, DOOH settings edit, report generation, and bulk upload. Token refresh is handled client-side; a 401 triggers a refresh + retry before logging out.
+Write-capable endpoints (all others are read-only, non-GET returns 405): auth, placement creation, user create/update, DOOH settings edit and bulk delete, report generation, and bulk upload. Token refresh is handled client-side; a 401 triggers a refresh + retry before logging out.

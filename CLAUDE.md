@@ -26,6 +26,7 @@ cd frontend
 npm install
 npm run dev    # dev server on localhost:5173 (proxies /api → localhost:8080)
 npm run build  # production build into dist/
+npm test       # vitest run — unit tests for pure helpers in src/utils
 ```
 
 ## Architecture
@@ -47,7 +48,7 @@ The upstream OAuth response has a non-standard shape — `{value, refreshToken: 
 
 ### Write Allowlist (mostly read-only)
 
-`readOnlyMiddleware` in `main.go` blocks all non-GET requests except paths in `writeAllowed`: auth endpoints, `/api/report/*` (report generation), `.../dooh-settings` (PUT screen edits), and `.../bulk-upload-jobs` (POST file upload). When registering a new write-capable route, you must also add it to `writeAllowed`.
+`readOnlyMiddleware` in `main.go` blocks all non-GET requests except paths in `writeAllowed`: auth endpoints, `/api/report/*` (report generation), `.../dooh-settings` (PUT screen edits, DELETE bulk screen delete), and `.../bulk-upload-jobs` (POST file upload). The entries match on path prefix/suffix only, never on method — `.../dooh-settings` admits *any* method on that path. So a new write-capable route on a path already in `writeAllowed` needs no change; only a route on a **new** path does.
 
 ### Backend Layout (`backend/`)
 
@@ -57,7 +58,7 @@ The upstream OAuth response has a non-standard shape — `{value, refreshToken: 
 | `config/config.go` | Env var loading (`IMPROVE_*`, `FRONTEND_ORIGIN`, `PORT`) |
 | `handlers/auth.go` | Login + refresh — OAuth password/refresh grants, normalizes token shape |
 | `handlers/proxy.go` | Core `doRequest`, `writeJSON`, `writeProxyResponse` helpers used by all handlers |
-| `handlers/publishers.go` | Publishers list/detail, placements, users, DOOH settings (list/item/PUT), `resolveTotal` pagination helper |
+| `handlers/publishers.go` | Publishers list/detail, placements, users, DOOH settings (list/item/PUT/bulk DELETE), `resolveTotal` pagination helper |
 | `handlers/report.go` | Report preview, generation, and status polling for placements and publishers |
 | `handlers/bulk_upload_jobs.go` | Bulk upload jobs list + create (multipart file upload) |
 | `server_test.go` | Unit test suite with a mock upstream server |
@@ -107,7 +108,7 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 | `components/map/` | Per-provider map bodies (`LeafletScreenMap`, `GoogleScreenMap`) + shared `ScreenPopupContent` |
 | `hooks/` | `useDebounce`, `useReportTab`, `useRecentActivity`, `useVersionCheck` |
 | `styles/` | Shared inline-style objects (`tables.js`, `tabs.js`) — not CSS files |
-| `utils/dateUtils.js`, `constants/pageTypes.js` | Date helpers, page-type badge constants |
+| `utils/dateUtils.js`, `utils/formatApiError.js`, `constants/pageTypes.js` | Date helpers, upstream error-body renderer, page-type badge constants |
 
 ### Key Implementation Details
 
@@ -118,8 +119,8 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 - **Report polling:** CSV generation polls `/report/status` every 2 seconds, up to 60 attempts, until `status_name === 'FINISHED_OK'`.
 - **Version check:** `useVersionCheck` compares `VITE_GIT_COMMIT` (baked in at Docker build from the Makefile) against the latest commit on `VITE_GIT_BRANCH` via the GitHub API every 5 minutes; Layout shows an update banner when outdated.
 - **DOOH map basemaps:** the map tab supports two providers, selected by a switcher and persisted via `?mapProvider=` + localStorage (`osm` is the default so Google's billed map loads stay opt-in). All provider config lives in `constants/mapConfig.js`; each provider body is lazy-loaded so only the chosen one's chunk downloads. Google Maps needs `VITE_GOOGLE_MAPS_API_KEY` (baked in at Docker build) and a Map ID (`VITE_GOOGLE_MAPS_MAP_ID`, defaults to `DEMO_MAP_ID`) — without a key the Google option renders disabled. Google markers are built imperatively and handed to `MarkerClusterer` rather than rendered as React elements, to avoid reconciling thousands of components.
-- **Screens selection mode:** the Screens toolbar has a **Select / Done** toggle. In select mode a checkbox column appears before ID and a red **Delete (N)** button becomes active; Create Screen, Download CSV and Refresh are disabled while search and the status filter stay live. Selection lives in a `Map<id, screen>` in `PlacementDetail.jsx`, so it persists across pages, searches and filter changes and the confirmation dialog can list rows from earlier pages without refetching. Only the checkbox toggles a row (its `<td>` stops propagation) — clicking the row body still opens the screen modal. `DeleteScreensModal` lists every selected screen with a per-row checkbox, and on confirm calls `DELETE .../dooh-settings?ids=...`, which the Go proxy validates against `^[0-9]+(,[0-9]+)*$` and forwards verbatim. The upstream delete is all-or-nothing, not idempotent and admin-only, so its 400/403/404 body is rendered in the dialog and the dialog stays open for a retry. After a successful delete the grid resets to page 1 (a later page could otherwise be left empty with no pagination controls) and select mode stays on until **Done**.
-- **Upstream error rendering:** `utils/formatApiError.js` is the shared renderer for upstream error bodies — it prefers `messages[]` (`property: description`, one per line), then `errors[]`, then `message`, then a caller-supplied fallback. Used by screen create, save and delete; render its output with `whiteSpace: 'pre-line'`.
+- **Screens selection mode:** the Screens toolbar has a **Select / Done** toggle. In select mode a checkbox column appears before ID and a red **Delete (N)** button becomes active; Create Screen, Download CSV and Refresh are disabled while search and the status filter stay live. Selection lives in a `Map<id, screen>` in `PlacementDetail.jsx`, so it persists across pages, searches and filter changes and the confirmation dialog can list rows from earlier pages without refetching. Only the checkbox toggles a row (its `<td>` stops propagation) — clicking the row body still opens the screen modal. Selection is capped at `MAX_DELETE_IDS` (1000, the upstream `PlacementDoohsDto.MAX_ITEMS`) **at selection time** — `toggleSelected`/`togglePageSelection` stop adding past it and the summary line says so — so the confirmation dialog can never open on a selection the delete would refuse. The selection is also reset when `publisherId`/`placementId` change, because React Router renders the same `PlacementDetail` element for all three routes and does not remount it on a param change. `DeleteScreensModal` lists every selected screen with a per-row checkbox, and on confirm calls `DELETE .../dooh-settings?ids=...`, which the Go proxy validates against `^[0-9]+(,[0-9]+)*$`, caps at 1000 ids (the upstream selector limit) and rejects a repeated `ids` parameter outright before forwarding verbatim. The upstream delete is all-or-nothing, not idempotent and admin-only, so its 400/403/404 body is rendered in the dialog and the dialog stays open for a retry. After a successful delete the grid always refetches from page 1: selection spans pages, so a delete can empty the current page or shrink the total below it, and `PaginationControls` only renders when the page has rows. Select mode stays on until **Done**. Because the ids travel in the request line (~9.1 KB worst case), `frontend/nginx.conf` sets `large_client_header_buffers 4 16k` — nginx's 8k default would answer 414 for a full 1000-id selector before the request reached Go (`TestNginxAllowsMaxDoohSelector` guards this, skipping when the file is absent). The other hops already fit it: Go's `DefaultMaxHeaderBytes` is 1 MB, and the upstream inventory service sets `server.max-http-request-header-size: 1048576`; the per-hop budget is written out in the `doohIDsLimit` comment in `backend/handlers/publishers.go`.
+- **Upstream error rendering:** `utils/formatApiError.js` is the shared renderer for upstream error bodies — it prefers `messages[]` (`property: description`, one per line, unrenderable entries dropped), then `message`, then a caller-supplied fallback. It never returns an empty string, since every caller renders it conditionally. Covered by `src/utils/formatApiError.test.js`. Used by screen create, save and delete; render its output with `whiteSpace: 'pre-line'`.
 - **Copy VAST Tag:** built client-side as `https://ad.360yield.com/{publisher_id}/advast?p={placement_id}&player_id=...&dooh_multiplier=1`; disabled when the screen has no `player_id`.
 - **Upstream API typo:** The SSP API returns `totalNumberOfElemements` (missing an 's'). `resolveTotal` in `handlers/` handles both spellings and falls back to the `X-360-Content-Range` header.
 - **Pagination defaults:** 20 items per page, max 100. Offset = `(page - 1) * limit`.

@@ -1152,12 +1152,18 @@ func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Req
 		upstreamPath += "?" + query
 	}
 
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
-		return
+	var bodyBytes []byte
+	contentType := ""
+	if method != http.MethodDelete {
+		var err error
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+		contentType = "application/json"
 	}
-	respBody, status, respHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, method, upstreamPath, accessToken, bodyBytes, "application/json")
+	respBody, status, respHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, method, upstreamPath, accessToken, bodyBytes, contentType)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -1177,10 +1183,41 @@ func (h *PublishersHandler) PostPlacementDoohSettings(w http.ResponseWriter, r *
 // bulk delete endpoint.
 var doohIDsPattern = regexp.MustCompile(`^[0-9]+(,[0-9]+)*$`)
 
+// doohIDsLimit mirrors the upstream placement.dooh.delete.selector.limit
+// (PlacementDoohsDto.MAX_ITEMS in 360yield-api-inventory) so an oversized selector is
+// rejected here with a readable message instead of upstream or the gateway.
+//
+// The selector travels in the request line, so every hop must accept it. Worst case
+// budget, at the widest id width seen in production (8 digits):
+//
+//	"DELETE " (7) + "/api/publishers/999999/placements/9999999/dooh-settings" (55) +
+//	"?ids=" (5) + 1000*8 digits + 999 commas (8999) + " HTTP/1.1" (9) = 9075 bytes
+//
+// Hops, verified:
+//   - nginx (frontend/nginx.conf): default large_client_header_buffers is 8k, which would
+//     414 the request, so it is raised to 16k (see TestNginxAllowsMaxDoohSelector).
+//   - Go net/http: DefaultMaxHeaderBytes is 1 MB, well clear of the budget.
+//   - upstream Tomcat: 360yield-api-inventory sets server.max-http-request-header-size:
+//     1048576 in config/application.yaml, so Tomcat's 8192-byte default does not apply.
+//     (Spring Boot 3 renamed max-http-header-size to max-http-request-header-size —
+//     grepping for the old name finds nothing and is not evidence the limit is unset.)
+const doohIDsLimit = 1000
+
 func (h *PublishersHandler) DeletePlacementDoohSettings(w http.ResponseWriter, r *http.Request) {
-	ids := r.URL.Query().Get("ids")
+	// Delete is all-or-nothing, so a repeated ids parameter must not be silently
+	// narrowed to its first value.
+	values := r.URL.Query()["ids"]
+	if len(values) != 1 {
+		writeErrorJSON(w, http.StatusBadRequest, "exactly one ids parameter is required")
+		return
+	}
+	ids := values[0]
 	if !doohIDsPattern.MatchString(ids) {
 		writeErrorJSON(w, http.StatusBadRequest, "ids must be a comma-separated list of numeric screen ids")
+		return
+	}
+	if strings.Count(ids, ",")+1 > doohIDsLimit {
+		writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("at most %d ids may be deleted at once", doohIDsLimit))
 		return
 	}
 	h.proxyDoohSettings(w, r, http.MethodDelete, "ids="+ids)

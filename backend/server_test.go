@@ -7,7 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -692,6 +696,9 @@ func TestPostPlacementDoohSettings_Success(t *testing.T) {
 			gotMethod = r.Method
 			gotToken = r.Header.Get("Authorization")
 			gotBody, _ = io.ReadAll(r.Body)
+			if r.URL.RawQuery != "" {
+				t.Errorf("upstream query: want empty, got %q", r.URL.RawQuery)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte(respBody))
@@ -828,20 +835,76 @@ func TestDeletePlacementDoohSettings_Success(t *testing.T) {
 	}
 }
 
-func TestDeletePlacementDoohSettings_ProxiesUpstreamError(t *testing.T) {
-	const errBody = `{"type":"ValidationException","messages":[{"error_code":"placement.dooh.unknown","property_name":"ids","description":"Unknown dooh setting id 7"}]}`
+// maxDoohSelector builds the largest selector the UI can send: doohIDsLimit ids at the
+// widest id width seen in production (8 digits).
+func maxDoohSelector() string {
+	ids := make([]string, 1000)
+	for i := range ids {
+		ids[i] = strconv.Itoa(10000000 + i)
+	}
+	return strings.Join(ids, ",")
+}
 
+// nginxCommentPattern strips `#` comments so a commented-out directive is not mistaken
+// for a live one.
+var nginxCommentPattern = regexp.MustCompile(`(?m)#.*$`)
+
+// nginxHeaderBufferPattern captures the size operand of large_client_header_buffers in any
+// form nginx accepts: a bare byte count, or a k/K/m/M suffixed one.
+var nginxHeaderBufferPattern = regexp.MustCompile(`large_client_header_buffers\s+\d+\s+(\d+)([kKmM]?)\s*;`)
+
+// TestNginxAllowsMaxDoohSelector guards the one hop this repo controls: the selector
+// travels in the request line, so the bundled nginx must be configured with a
+// large_client_header_buffers size that fits the worst case (its 8k default would answer
+// 414 before the request ever reached Go). The other hops are already clear — Go's
+// DefaultMaxHeaderBytes is 1 MB, and the upstream inventory service sets
+// server.max-http-request-header-size: 1048576 — see the doohIDsLimit comment.
+//
+// frontend/nginx.conf is installed as /etc/nginx/conf.d/default.conf, which the stock
+// image includes inside the http block, so the directive can only live in server context.
+func TestNginxAllowsMaxDoohSelector(t *testing.T) {
+	path := filepath.Join("..", "frontend", "nginx.conf")
+	conf, err := os.ReadFile(path)
+	if err != nil {
+		// Keep `go test ./...` usable in a backend-only checkout.
+		t.Skipf("skipping: %s not readable: %v", path, err)
+	}
+	m := nginxHeaderBufferPattern.FindSubmatch(nginxCommentPattern.ReplaceAll(conf, nil))
+	if m == nil {
+		t.Fatal("frontend/nginx.conf: large_client_header_buffers not set; the default 8k buffer rejects a 1000-id delete with 414")
+	}
+	size, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch string(m[2]) {
+	case "k", "K":
+		size *= 1024
+	case "m", "M":
+		size *= 1024 * 1024
+	}
+	// "DELETE /api/publishers/{id}/placements/{id}/dooh-settings?ids=<selector> HTTP/1.1"
+	requestLine := len("DELETE /api/publishers/999999/placements/9999999/dooh-settings?ids= HTTP/1.1") + len(maxDoohSelector())
+	if size < requestLine {
+		t.Errorf("large_client_header_buffers size %d is too small for a %d byte request line", size, requestLine)
+	}
+}
+
+func TestDeletePlacementDoohSettings_ForwardsLongSelector(t *testing.T) {
+	selector := maxDoohSelector()
+
+	var gotQuery string
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.RawQuery
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(errBody))
+			w.Write([]byte(`{"dooh_settings":[]}`))
 		},
 	})
 
 	app := appServer(t, upstream.URL)
 
-	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=7", nil)
+	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids="+selector, nil)
 	req.Header.Set("X-Access-Token", "mock-access-token")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -850,16 +913,73 @@ func TestDeletePlacementDoohSettings_ProxiesUpstreamError(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status: want 400, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
 	}
-	got, _ := io.ReadAll(resp.Body)
-	if string(got) != errBody {
-		t.Errorf("body: want %s, got %s", errBody, got)
+	if gotQuery != "ids="+selector {
+		t.Errorf("upstream query truncated: got %d bytes, want %d", len(gotQuery), len("ids="+selector))
+	}
+}
+
+func TestDeletePlacementDoohSettings_ProxiesUpstreamError(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		errBody string
+	}{
+		{"validation", http.StatusBadRequest, `{"type":"ValidationException","messages":[{"error_code":"placement.dooh.unknown","property_name":"ids","description":"Unknown dooh setting id 7"}]}`},
+		{"forbidden", http.StatusForbidden, `{"type":"ForbiddenException","messages":[{"error_code":"access.denied","property_name":"ids","description":"Administrator module required"}]}`},
+		{"forbidden empty body", http.StatusForbidden, ``},
+		{"unknown placement", http.StatusNotFound, `{"type":"NotFoundException","messages":[{"error_code":"placement.unknown","property_name":"placementId","description":"Unknown placement"}]}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotQuery string
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+					gotMethod = r.Method
+					gotQuery = r.URL.RawQuery
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					w.Write([]byte(tc.errBody))
+				},
+			})
+
+			app := appServer(t, upstream.URL)
+
+			req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=7", nil)
+			req.Header.Set("X-Access-Token", "mock-access-token")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status: want %d, got %d", tc.status, resp.StatusCode)
+			}
+			if gotMethod != http.MethodDelete {
+				t.Errorf("upstream method: want DELETE, got %s", gotMethod)
+			}
+			if gotQuery != "ids=7" {
+				t.Errorf("upstream query: want %q, got %q", "ids=7", gotQuery)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			if string(got) != tc.errBody {
+				t.Errorf("body: want %s, got %s", tc.errBody, got)
+			}
+		})
 	}
 }
 
 func TestDeletePlacementDoohSettings_RejectsInvalidIds(t *testing.T) {
+	tooMany := make([]string, 1001)
+	for i := range tooMany {
+		tooMany[i] = strconv.Itoa(i + 1)
+	}
+
 	tests := []struct {
 		name  string
 		query string
@@ -869,13 +989,17 @@ func TestDeletePlacementDoohSettings_RejectsInvalidIds(t *testing.T) {
 		{"non-numeric", "?ids=abc"},
 		{"empty element", "?ids=1,,2"},
 		{"wrong separator", "?ids=1;2"},
+		{"trailing comma", "?ids=1,2,"},
+		{"whitespace", "?ids=1,%202"},
+		{"repeated parameter", "?ids=1&ids=2"},
+		{"over limit", "?ids=" + strings.Join(tooMany, ",")},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
 			upstream := mockUpstream(t, map[string]http.HandlerFunc{
-				"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+				"/": func(w http.ResponseWriter, r *http.Request) {
 					called = true
 					w.Write([]byte(`{}`))
 				},
@@ -898,7 +1022,67 @@ func TestDeletePlacementDoohSettings_RejectsInvalidIds(t *testing.T) {
 			if called {
 				t.Error("upstream was called for an invalid ids selector")
 			}
+			var body struct {
+				Message string `json:"message"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("decode error body: %v", err)
+			}
+			if body.Message == "" {
+				t.Error("error body: want a non-empty message field")
+			}
 		})
+	}
+}
+
+func TestDeletePlacementDoohSettings_AcceptsSingleID(t *testing.T) {
+	var gotQuery string
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"dooh_settings":[{"id":7}]}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodDelete, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=7", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if gotQuery != "ids=7" {
+		t.Errorf("upstream query: want %q, got %q", "ids=7", gotQuery)
+	}
+}
+
+func TestCORS_PreflightAllowsDelete(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodOptions, app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=1", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", http.MethodDelete)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status: want 204, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodDelete) {
+		t.Errorf("Access-Control-Allow-Methods: want it to contain DELETE, got %q", got)
 	}
 }
 
