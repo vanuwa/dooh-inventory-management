@@ -936,6 +936,73 @@ func TestNginxAllowsMaxDoohSelector(t *testing.T) {
 	}
 }
 
+// nginxBodySizePattern captures the operand of client_max_body_size in any form nginx
+// accepts: a bare byte count, or a k/K/m/M suffixed one.
+var nginxBodySizePattern = regexp.MustCompile(`client_max_body_size\s+(\d+)([kKmM]?)\s*;`)
+
+// nginxReadTimeoutPattern captures the operand of proxy_read_timeout. nginx reads a bare
+// number as seconds and accepts s/m/h suffixes; for a time operand `m` means minutes.
+var nginxReadTimeoutPattern = regexp.MustCompile(`proxy_read_timeout\s+(\d+)([smh]?)\s*;`)
+
+// TestNginxAllowsSoftDeletePut guards the two nginx defaults the soft delete crosses. The
+// soft delete sends the selected rows back as a PUT .../dooh-settings body, so the worst
+// case is doohIDsLimit (1000) whole screen rows at roughly 1 KB each — ~1 MB, straddling
+// nginx's 1 MB client_max_body_size default, which would answer 413 before the request
+// reached Go. Upstream then validates, looks up and history-writes all 1000 rows in one
+// transaction, and handlers/proxy.go uses http.DefaultClient with no timeout of its own,
+// so nginx's 60s proxy_read_timeout default is the binding limit — a 504 there would
+// report failure on a delete that committed.
+//
+// Both thresholds are floors, not exact matches, so an operator raising them later does
+// not fail the suite.
+func TestNginxAllowsSoftDeletePut(t *testing.T) {
+	path := filepath.Join("..", "frontend", "nginx.conf")
+	conf, err := os.ReadFile(path)
+	if err != nil {
+		// Keep `go test ./...` usable in a backend-only checkout.
+		t.Skipf("skipping: %s not readable: %v", path, err)
+	}
+	stripped := nginxCommentPattern.ReplaceAll(conf, nil)
+
+	m := nginxBodySizePattern.FindSubmatch(stripped)
+	if m == nil {
+		t.Fatal("frontend/nginx.conf: client_max_body_size not set; the default 1m rejects a 1000-row soft-delete PUT with 413")
+	}
+	size, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch string(m[2]) {
+	case "k", "K":
+		size *= 1024
+	case "m", "M":
+		size *= 1024 * 1024
+	}
+	const minBodySize = 2 * 1024 * 1024
+	if size < minBodySize {
+		t.Errorf("client_max_body_size %d is too small for a 1000-row soft-delete PUT; want at least %d", size, minBodySize)
+	}
+
+	m = nginxReadTimeoutPattern.FindSubmatch(stripped)
+	if m == nil {
+		t.Fatal("frontend/nginx.conf: proxy_read_timeout not set; the default 60s can 504 on a 1000-row soft-delete PUT that commits upstream")
+	}
+	seconds, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch string(m[2]) {
+	case "m":
+		seconds *= 60
+	case "h":
+		seconds *= 3600
+	}
+	const minTimeoutSeconds = 120
+	if seconds < minTimeoutSeconds {
+		t.Errorf("proxy_read_timeout %ds is too short for a 1000-row soft-delete PUT; want at least %ds", seconds, minTimeoutSeconds)
+	}
+}
+
 func TestDeletePlacementDoohSettings_ForwardsLongSelector(t *testing.T) {
 	selector := maxDoohSelector()
 
