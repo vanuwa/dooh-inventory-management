@@ -54,10 +54,10 @@ The upstream OAuth response has a non-standard shape — `{value, refreshToken: 
 
 | Path | Purpose |
 |---|---|
-| `main.go` | Server setup, route registration, CORS + read-only middleware with `writeAllowed` allowlist |
-| `config/config.go` | Env var loading (`IMPROVE_*`, `FRONTEND_ORIGIN`, `PORT`) |
+| `main.go` | Server setup, route registration, CORS + `apiEnvMiddleware` (400 on an unknown `X-Api-Env`) + read-only middleware with `writeAllowed` allowlist |
+| `config/config.go` | Env var loading (`IMPROVE_*`, `FRONTEND_ORIGIN`, `PORT`); the `Environments` table (`Environment{Name, BaseURL, ClientID, ClientSecret}`) and `Config.Env(name)` lookup |
 | `handlers/auth.go` | Login + refresh — OAuth password/refresh grants, normalizes token shape |
-| `handlers/proxy.go` | Core `doRequest`, `writeJSON`, `writeProxyResponse` helpers used by all handlers |
+| `handlers/proxy.go` | Core `doRequest`, `writeJSON`, `writeProxyResponse` helpers used by all handlers; `EnvHeader` plus the `upstreamEnv` / `upstreamBaseURL` per-request resolvers |
 | `handlers/publishers.go` | Publishers list/detail, placements, users, DOOH settings (list/item/PUT/bulk DELETE), `resolveTotal` pagination helper |
 | `handlers/report.go` | Report preview, generation, and status polling for placements and publishers |
 | `handlers/bulk_upload_jobs.go` | Bulk upload jobs list + create (multipart file upload) |
@@ -86,6 +86,8 @@ POST /api/report/generate/publisher/{publisherId}                   ← start CS
 GET  /api/report/status/{reportGenerationId}                        ← poll until FINISHED_OK
 ```
 
+Every route accepts the optional `X-Api-Env` header (`production` | `acceptance`) selecting the upstream instance for that request — see **API environments** below.
+
 ### Frontend Layout (`frontend/src/`)
 
 | Path | Purpose |
@@ -99,7 +101,7 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 | `pages/PlacementDetail.jsx` | Tabs: Screens grid + Reporting; screen view/edit modal, Copy VAST Tag |
 | `pages/Changelog.jsx` | Renders `CHANGELOG.md` (copied into `public/` at Docker build) |
 | `pages/UserPage.jsx` | User profile (email, business unit, roles) |
-| `components/Layout.jsx` | Header with nav, user avatar, logout, outdated-version banner |
+| `components/Layout.jsx` | Header with nav, API environment switcher, user avatar, logout, outdated-version banner, non-production accent strip |
 | `components/ReportingTab.jsx` | Shared reporting UI (placement + publisher), driven by `hooks/useReportTab.js` |
 | `components/BulkUploadJobsTab.jsx` | Jobs grid with per-task detail modal + file upload |
 | `components/PublisherUsersTab.jsx` | Publisher users grid |
@@ -109,6 +111,7 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 | `hooks/` | `useDebounce`, `useReportTab`, `useRecentActivity`, `useVersionCheck` |
 | `styles/` | Shared inline-style objects (`tables.js`, `tabs.js`) — not CSS files |
 | `utils/dateUtils.js`, `utils/formatApiError.js`, `constants/pageTypes.js` | Date helpers, upstream error-body renderer, page-type badge constants |
+| `constants/apiEnvironments.js`, `utils/apiEnvironment.js` | Environment table (`API_ENVIRONMENTS`, `DEFAULT_API_ENV`) and its pure helpers (`isKnownApiEnv`, `scopedKey`, `readApiEnv`, `writeApiEnv`, `migrateLegacyKeys`) |
 
 ### Key Implementation Details
 
@@ -122,7 +125,8 @@ GET  /api/report/status/{reportGenerationId}                        ← poll unt
 - **Screens selection mode:** the Screens toolbar has a **Select / Done** toggle. In select mode a checkbox column appears before ID and a red **Delete (N)** button becomes active; Create Screen, Download CSV and Refresh are disabled while search and the status filter stay live. Selection lives in a `Map<id, screen>` in `PlacementDetail.jsx`, so it persists across pages, searches and filter changes and the confirmation dialog can list rows from earlier pages without refetching; it is capped at `MAX_DELETE_IDS` (1000, the upstream `PlacementDoohsDto.MAX_ITEMS`) at selection time, and reset when the tab, publisher or placement changes. Only the checkbox toggles a row (its `<td>` stops propagation) — clicking the row body still opens the screen modal. `DeleteScreensModal` lists every selected screen with a per-row checkbox and on confirm calls `DELETE .../dooh-settings?ids=...`, which the Go proxy validates against `^[0-9]+(,[0-9]+)*$`, caps at 1000 ids and rejects a repeated `ids` parameter before forwarding verbatim. The upstream delete is all-or-nothing, not idempotent and admin-only, so its 400/403/404 body is rendered in the dialog and the dialog stays open for a retry. After a successful delete the grid always refetches from page 1, because selection spans pages and a delete can shrink the total below the current page. Select mode stays on until **Done**.
 - **Delete selector request-line budget:** the ids travel in the request line, so every hop must accept the worst case — `DELETE /api/publishers/{id}/placements/{id}/dooh-settings?ids=` plus 1000 8-digit ids is ~9.1 KB. `frontend/nginx.conf` therefore sets `large_client_header_buffers 4 16k`; nginx's 8k default would answer 414 before the request reached Go (`TestNginxAllowsMaxDoohSelector` guards this, skipping when the file is absent). The other hops already fit it: Go's `DefaultMaxHeaderBytes` is 1 MB, and the upstream inventory service sets `server.max-http-request-header-size: 1048576`.
 - **Upstream error rendering:** `utils/formatApiError.js` is the shared renderer for screen create/save/delete error bodies (the older placement/user modals still parse the upstream body inline) — it prefers `messages[]` (`property: description`, one per line, unrenderable entries dropped), then `message`, then a caller-supplied fallback. It never returns an empty string, since every caller renders it conditionally. Covered by `src/utils/formatApiError.test.js`. Used by screen create, save and delete; render its output with `whiteSpace: 'pre-line'`.
-- **Copy VAST Tag:** built client-side as `https://ad.360yield.com/{publisher_id}/advast?p={placement_id}&player_id=...&dooh_multiplier=1`; disabled when the screen has no `player_id`.
+- **API environments:** the upstream SSP instance is resolved **per request** from an `X-Api-Env` header (`production` → `api.360yield.com`, the default; `acceptance` → `api.360yielddev.com`), never from server state, so two people on one deployment can sit in different environments. `apiEnvMiddleware` in `main.go` answers `400 unknown api environment` for an unrecognised value — only an *absent* header falls back to production, so an older cached bundle keeps working while a typo can never silently hit production. `config.Environment` carries `{Name, BaseURL, ClientID, ClientSecret}` and every handler goes through `upstreamBaseURL(h.cfg, r)` (`handlers/proxy.go`), including both `fetchToken` calls in `auth.go`, so a token is always minted by the instance it will be spent on. Both environments currently share one OAuth client (`IMPROVE_CLIENT_ID` / `IMPROVE_CLIENT_SECRET`); the only new variable is `IMPROVE_ACCEPTANCE_API_BASE_URL`. Frontend: `api.js` sends the header on **both** fetch sites (the silent refresh included) and scopes `access_token` / `refresh_token` as `<key>:<env>`; `useRecentActivity` scopes `dooh_recent_activity` the same way, since its entries embed per-instance IDs. `migrateLegacyKeys()` runs at **module scope** in `main.jsx` before `createRoot(...).render(...)` — it must not be an effect, because `AuthContext` reads tokens in a `useState` initialiser during first render. `dooh-metadata-page-size` and `dooh-metadata-map-provider` stay unscoped (env-independent UI prefs). Switching calls `switchApiEnv`, which persists the choice and does a full page load to `/recent`, because in-flight requests and cached state carry IDs meaningless in the other instance; `Login.jsx` carries its own selector since `Layout` is not rendered on `/login`. The non-production accent strip uses `#fff7ed` / `#fb923c` / `#7c2d12` — deliberately *not* the amber of the update banner, which can be on screen at the same time.
+- **Copy VAST Tag:** built client-side as `https://ad.360yield.com/{publisher_id}/advast?p={placement_id}&player_id=...&dooh_multiplier=1`; disabled when the screen has no `player_id`. The host is the ad server, not the API, and stays **production-only** by decision — on acceptance the copied tag points at the production ad server while carrying acceptance IDs. Switching it would mean adding an `adHost` field to `API_ENVIRONMENTS`.
 - **Upstream API typo:** The SSP API returns `totalNumberOfElemements` (missing an 's'). `resolveTotal` in `handlers/` handles both spellings and falls back to the `X-360-Content-Range` header.
 - **Pagination defaults:** 20 items per page, max 100. Offset = `(page - 1) * limit`.
 - **Plans:** `plans/` holds dated implementation plans for past features — useful context for why things are shaped the way they are.

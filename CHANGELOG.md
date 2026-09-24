@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-24
+
+### Features
+- The portal can now talk to either SSP instance without a rebuild: an environment switcher in the header (and on the login page) selects **Production** (`api.360yield.com`) or **Acceptance** (`api.360yielddev.com`), and every `/api/...` call carries the choice as an `X-Api-Env` header that the Go proxy resolves per request
+- Both the upstream base URL and the OAuth client used to mint the token follow the selection, so an access token is always issued by the instance it is spent on; the same `IMPROVE_CLIENT_ID` / `IMPROVE_CLIENT_SECRET` is valid on both, so switching needs no extra secrets
+- Tokens and recent-activity history are namespaced per environment in localStorage, so you stay logged into production and acceptance at the same time and switching does not log either session out; existing unscoped keys are migrated to production on first load, so nobody is logged out by the upgrade
+- An orange accent strip below the header names the active environment and its host whenever it is not production, so an acceptance session cannot be mistaken for a production one; switching does a full reload to `/recent`, because cached page state carries IDs that mean nothing in the other instance
+- A request naming an unconfigured environment is rejected with `400 unknown api environment` before it reaches any upstream, while a request with no header keeps behaving exactly as before (production), so an older cached bundle continues to work
+
+### Known limitations
+- **Copy VAST Tag** still builds a production `https://ad.360yield.com/...` URL. That is the ad server rather than the API, and it is intentionally not switched — on acceptance the copied tag therefore points at the production ad server while carrying acceptance IDs
+
 ## 2026-09-23
 
 ### Features

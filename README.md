@@ -31,6 +31,7 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
   - **Screens** — server-side paginated grid; click any row to open a view/edit modal with full screen details; download all screens as CSV; a **Select** mode turns on a checkbox column so screens can be picked across pages/searches (up to 1000 per delete — the selection stops there and says so) and deleted in bulk via a confirmation dialog (admin-only — see Prerequisites)
   - **Reporting** — generate and download a CSV performance report for the placement
 - Automatic token refresh — handled client-side via response headers, sessions stay alive without re-login
+- Switch between the production and acceptance SSP instances from the header (or on the login page) without a rebuild — each environment keeps its own session, so both stay logged in (see [API environments](#api-environments))
 
 ---
 
@@ -115,6 +116,63 @@ make down
 
 ---
 
+## API environments
+
+The portal can talk to either SSP instance, chosen in the UI rather than fixed at
+container start:
+
+| Environment | Upstream host | Base URL variable | Default |
+|---|---|---|---|
+| **Production** (default) | `api.360yield.com` | `IMPROVE_API_BASE_URL` | `https://api.360yield.com` |
+| **Acceptance** | `api.360yielddev.com` | `IMPROVE_ACCEPTANCE_API_BASE_URL` | `https://api.360yielddev.com` |
+
+Both defaults are already set in `compose.yaml`, so nothing needs to go in `.env`
+unless you want to point an environment somewhere else.
+
+**No extra credentials are needed.** The same `IMPROVE_CLIENT_ID` /
+`IMPROVE_CLIENT_SECRET` is valid against both instances, so the acceptance entry
+reuses it — there are deliberately no acceptance-specific credential variables. If
+that client were ever de-registered on `api.360yielddev.com`, the symptom would be a
+`401` at acceptance login only, with production unaffected.
+
+### Switching
+
+Use the environment dropdown in the header, next to the user avatar. The login page
+has its own selector, since the header is not rendered there and you need to pick the
+instance before typing credentials.
+
+- Switching does a **full page reload** to `/recent` — in-flight requests and cached
+  page state carry publisher/placement IDs that mean nothing in the other instance.
+- When the active environment is not production, a non-dismissible orange strip under
+  the header names it and its host, so an acceptance session cannot be mistaken for a
+  production one.
+- Access tokens and the recent-activity history are stored **per environment**
+  (`access_token:acceptance`, `dooh_recent_activity:production`, …), so you can stay
+  logged into both at once and switching never logs the other session out. Pre-existing
+  unscoped keys are migrated to production on first load, so the change logs nobody out.
+
+### How it reaches the backend
+
+The frontend sends the selection as an `X-Api-Env: production|acceptance` header on
+every `/api/...` call, including the silent token refresh. The Go proxy resolves the
+upstream base URL **and** the OAuth client from that header per request — nothing is
+stored server-side, so two people sharing one deployment can sit in different
+environments. A missing header means production (an older cached bundle keeps working);
+a header naming an unconfigured environment is rejected with `400 unknown api
+environment` before any upstream call, so a typo can never silently talk to production.
+
+Adding a further instance (e.g. alpha) is one entry in `config.Load()` plus one row in
+`frontend/src/constants/apiEnvironments.js`.
+
+### Known limitation — Copy VAST Tag
+
+**Copy VAST Tag** always builds a production `https://ad.360yield.com/...` URL. That is
+the ad server, a different host from the API, and it is intentionally not switched — on
+acceptance the copied tag therefore points at the production ad server while carrying
+acceptance publisher/placement IDs.
+
+---
+
 ## Development
 
 ### Backend (Go)
@@ -170,3 +228,5 @@ make rebuild-ui    # rebuild only the frontend container
 | `POST` | `/api/report/generate/publisher/{publisherId}` | Start async publisher CSV report generation |
 
 Write-capable endpoints (all others are read-only, non-GET returns 405): auth, placement creation, user create/update, DOOH settings edit and bulk delete, report generation, and bulk upload. Token refresh is handled client-side; a 401 triggers a refresh + retry before logging out.
+
+Every route honours the optional `X-Api-Env` header (`production` — the default when absent — or `acceptance`), which picks the upstream instance for that request; an unknown value returns `400` (see [API environments](#api-environments)).
