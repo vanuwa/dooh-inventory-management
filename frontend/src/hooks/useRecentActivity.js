@@ -1,10 +1,19 @@
+import { readApiEnv, scopedKey } from '../utils/apiEnvironment.js'
+
 const STORAGE_KEY = 'dooh_recent_activity'
 const MAX_ITEMS = 10
+
+// Resolved per call, never at module scope: entries embed publisher and placement
+// IDs, which mean different records on each instance, so a stale key would show
+// one environment's history while browsing the other.
+function storageKey() {
+  return scopedKey(STORAGE_KEY, readApiEnv())
+}
 
 export function useRecentActivity() {
   function getItems() {
     try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+      return JSON.parse(localStorage.getItem(storageKey()) || '[]')
     } catch {
       return []
     }
@@ -16,7 +25,7 @@ export function useRecentActivity() {
     const existing = items.findIndex(item => item.url === entry.url)
     if (existing !== -1) items.splice(existing, 1)
     items.unshift({ ...entry, visitedAt: Date.now() })
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, MAX_ITEMS)))
+    localStorage.setItem(storageKey(), JSON.stringify(items.slice(0, MAX_ITEMS)))
   }
 
   return { recordVisit, getItems }

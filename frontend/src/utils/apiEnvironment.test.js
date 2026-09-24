@@ -88,6 +88,14 @@ describe('migrateLegacyKeys', () => {
     expect(storage.getItem('refresh_token')).toBeNull()
   })
 
+  it('moves the unscoped recent-activity history to :production', () => {
+    const history = JSON.stringify([{ url: '/publishers/1', pageType: 'publisher' }])
+    const storage = stubStorage({ dooh_recent_activity: history })
+    migrateLegacyKeys(storage)
+    expect(storage.data['dooh_recent_activity:production']).toBe(history)
+    expect(storage.getItem('dooh_recent_activity')).toBeNull()
+  })
+
   it('is a no-op on a second call', () => {
     const storage = stubStorage({ access_token: 'a1', refresh_token: 'r1' })
     migrateLegacyKeys(storage)
