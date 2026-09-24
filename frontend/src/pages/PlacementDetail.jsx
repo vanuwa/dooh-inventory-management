@@ -12,6 +12,7 @@ import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError } from '../utils/formatApiError.js'
+import { SCREEN_STATUS_OPTIONS } from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -228,7 +229,7 @@ export default function PlacementDetail() {
   function screensPath(forPage, forLimit) {
     let path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${forPage}&limit=${forLimit}`
     if (committedSearch) path += `&search=${encodeURIComponent(committedSearch)}`
-    if (statusFilter) path += `&status=${statusFilter}`
+    if (statusFilter) path += `&status=${encodeURIComponent(statusFilter)}`
     return path
   }
 
@@ -562,9 +563,9 @@ export default function PlacementDetail() {
                 onChange={e => setSearch(e.target.value)}
               />
               <select style={s.select} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-                <option value="">All</option>
-                <option value="active">Active only</option>
-                <option value="inactive">Inactive only</option>
+                {SCREEN_STATUS_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
               </select>
               <button
                 style={s.selectBtn}
