@@ -56,13 +56,14 @@ export function screenStatusBadge(status) {
 
 // The fields upstream refuses a screen without, in the order the edit dialog shows them.
 //
-// They are required twice over: `placement-dooh-settings.json` marks all ten `required`
-// (checked before binding), and `PlacementDoohDto` carries `@NotNull`/`@NotBlank` on every
-// one of them, which `@Valid @RequestBody` enforces for *every* element of the batch. So a
-// row missing any of these cannot be updated at all — not by dropping the key (absent
-// fails `@NotNull`) and not by keeping the empty string (`""` fails `@NotBlank`). Rows like
-// that exist: the upstream test suite has helpers that "simulate legacy/pre-existing data
-// where the FK is null".
+// They are required twice over, though not equally: `placement-dooh-settings.json` marks all
+// ten `required`, but it is draft-03 and its `dooh_settings.items` is a one-element *array*
+// — tuple validation — so the schema only ever checks `dooh_settings[0]`. Rows 1..n are
+// reached by `PlacementDoohDto`'s `@NotNull`/`@NotBlank` instead, which `@Valid @RequestBody`
+// enforces for every element of the batch. Either way a row missing one of these cannot be
+// updated at all — not by dropping the key (absent fails `@NotNull`) and not by keeping the
+// stored string (`""` and `"   "` alike fail `@NotBlank`). Rows like that exist: the upstream
+// test suite has helpers that "simulate legacy/pre-existing data where the FK is null".
 export const SOFT_DELETE_REQUIRED_FIELDS = [
   'player_id',
   'resolution_width',
@@ -76,29 +77,65 @@ export const SOFT_DELETE_REQUIRED_FIELDS = [
   'allowed_content',
 ]
 
-// The required fields a row cannot supply, using the same `null`/`''` test softDeleteBody
-// filters by — so anything this reports is exactly what that body would have omitted.
-// Numeric 0 counts as supplied: `lat: 0` is a real coordinate.
+// The required fields a row cannot supply. The test is trimmed, not the plain `null`/`''`
+// softDeleteBody filters by, because five of the ten — player_id, venue_type_tax,
+// country_code, city, allowed_content — are `@NotBlank` upstream, which rejects `"   "` as
+// well. That rejection arrives through `@Valid`, as a MethodArgumentNotValidException that
+// `ExceptionHandlerController` has no handler for, i.e. a 500 naming no screen — exactly the
+// unattributable failure this pre-check exists to prevent. So a whitespace-only value counts
+// as missing here even though softDeleteBody would have kept the key.
+// Numeric 0 counts as supplied: `lat: 0` is a real coordinate, and `String(0).trim()` is '0'.
 export function missingRequiredFields(screen) {
   return SOFT_DELETE_REQUIRED_FIELDS.filter(field => {
     const value = screen?.[field]
-    return value == null || value === ''
+    return value == null || String(value).trim() === ''
   })
 }
 
-// Splits a selection into the rows the soft delete can carry and the rows it cannot.
-// Rows in `blocked` have to go through the permanent delete instead, which validates
-// nothing.
+// `cpm` and `currency_code` require each other upstream (`validateCurrency`) in *both*
+// directions, and the whole all-or-nothing batch dies on either: a floor price with no
+// currency raises `placement.dooh.cpm.currency.required`, a currency with no floor price
+// `placement.dooh.cpm.required`. Both are reachable here, because `cpm` is a Go pointer (an
+// upstream NULL arrives as null and softDeleteBody drops it) while `currency_code` is a plain
+// string (a stored value is kept). The pair is decidable from data already in hand, so decide
+// it here rather than in a 400. The name reported is the half that is absent.
+function missingCurrencyPair(screen) {
+  const hasCpm = screen?.cpm != null && screen.cpm !== ''
+  const hasCurrency = screen?.currency_code != null && String(screen.currency_code).trim() !== ''
+  if (hasCpm && !hasCurrency) return ['currency_code']
+  if (hasCurrency && !hasCpm) return ['cpm']
+  return []
+}
+
+// Splits a selection into the rows the soft delete can carry and the rows it cannot. A row in
+// `blocked` has to be unticked; the permanent delete is not an escape hatch for it, because
+// that purges the whole ticked selection rather than the blocked rows alone.
 export function partitionSoftDeletable(rows) {
   const deletable = []
   const blocked = []
   for (const row of rows) {
-    const missing = missingRequiredFields(row)
+    const missing = [...missingRequiredFields(row), ...missingCurrencyPair(row)]
     if (missing.length === 0) deletable.push(row)
     else blocked.push({ row, missing })
   }
   return { deletable, blocked }
 }
+
+// The two keys upstream fills in from the path itself, so an update body must never carry
+// them. `ApiPlacementDoohSettingsServiceImpl.updateAll` does
+// `item.setPlacementId(placementId); item.setPublisherId(actualPublisherId)` before it
+// converts, `applyDtoFields` never writes the entity's publisher association on the update
+// path, `validateAll` falls back to the path's placement id when the key is absent, and the
+// JSON schema marks both `required: false`. Dropping them is therefore lossless.
+//
+// Sending them is not. `PlacementDoohValidatorImpl.validate` compares any *non-null* value
+// against the path's owner, and `placement_dooh.publisher_id` is nullable in production (the
+// upstream notes record drifted rows and dangling placements as known to exist), where our
+// proxy decodes a NULL int64 into `0`. `"publisher_id": 0` is neither null nor '', so it
+// would survive the filter below and raise `placement.dooh.publisher.id.mismatch` — killing
+// the whole all-or-nothing batch on precisely the rows a delete exists to clear. A merely
+// drifted, non-null value fails the same way. `placement_id` has the identical shape.
+export const PATH_OWNED_KEYS = ['publisher_id', 'placement_id']
 
 // Body for the soft delete: the selected rows, flipped to `status: 'deleted'`.
 //
@@ -120,13 +157,15 @@ export function partitionSoftDeletable(rows) {
 // Numeric zero survives on purpose — lat: 0 / lon: 0 is a real coordinate and width: 0 is
 // storable — so the test is `!= null && !== ''`, never truthiness.
 //
+// `PATH_OWNED_KEYS` are dropped whatever they hold, for the reason given above them.
+//
 // This shapes the body only; whether a row *can* be sent is `partitionSoftDeletable`.
 //
 // Never mutates its input — the caller's rows are the dialog's live selection snapshot.
 export function softDeleteBody(screens) {
   const rows = screens.map(screen => {
     const row = Object.fromEntries(
-      Object.entries(screen).filter(([, v]) => v != null && v !== '')
+      Object.entries(screen).filter(([k, v]) => !PATH_OWNED_KEYS.includes(k) && v != null && v !== '')
     )
     row.status = 'deleted'
     return row

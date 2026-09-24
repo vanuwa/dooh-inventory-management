@@ -148,6 +148,18 @@ describe('softDeleteBody', () => {
     expect(missingRequiredFields(fixtureScreen({ lat: null, country_code: '' }))).toEqual(['lat', 'country_code'])
   })
 
+  it('never sends publisher_id or placement_id — upstream sets both from the path', () => {
+    // a NULL publisher_id reaches us as 0 through the Go int64, which is neither null nor ''
+    const rows = softDeleteBody([fixtureScreen(), fixtureScreen({ id: 4712, publisher_id: 0, placement_id: 0 })]).dooh_settings
+    for (const row of rows) {
+      expect(row).not.toHaveProperty('publisher_id')
+      expect(row).not.toHaveProperty('placement_id')
+    }
+    // the rest of the row is untouched by the drop
+    expect(rows[0].id).toBe(4711)
+    expect(rows[0].player_id).toBe('test-player-042')
+  })
+
   it('keeps a set value in a field that is usually empty', () => {
     const [row] = softDeleteBody([fixtureScreen({ region: 'NH', cpm: 1.5, currency_code: 'EUR' })]).dooh_settings
     expect(row.region).toBe('NH')
@@ -187,6 +199,11 @@ describe('missingRequiredFields', () => {
       .toEqual(['venue_type_tax', 'country_code', 'city', 'allowed_content'])
   })
 
+  it('reports a whitespace-only value in a @NotBlank field', () => {
+    expect(missingRequiredFields(fixtureScreen({ city: '   ', venue_type_tax: '\t', player_id: ' ' })))
+      .toEqual(['player_id', 'venue_type_tax', 'city'])
+  })
+
   it('covers exactly the ten fields upstream marks required', () => {
     expect(SOFT_DELETE_REQUIRED_FIELDS).toEqual([
       'player_id', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax',
@@ -208,6 +225,24 @@ describe('partitionSoftDeletable', () => {
     const { deletable, blocked } = partitionSoftDeletable([fixtureScreen(), fixtureScreen({ id: 4712 })])
     expect(deletable).toHaveLength(2)
     expect(blocked).toEqual([])
+  })
+
+  it('blocks a whitespace-only required field, which @NotBlank rejects as a bare 500', () => {
+    const bad = fixtureScreen({ id: 4713, allowed_content: '  ' })
+    expect(partitionSoftDeletable([bad]).blocked).toEqual([{ row: bad, missing: ['allowed_content'] }])
+  })
+
+  it('blocks either half of the cpm/currency_code pair, naming the absent one', () => {
+    const noCurrency = fixtureScreen({ id: 4714, cpm: 2.5 })
+    const noCpm = fixtureScreen({ id: 4715, currency_code: 'EUR' })
+    expect(partitionSoftDeletable([noCurrency]).blocked).toEqual([{ row: noCurrency, missing: ['currency_code'] }])
+    expect(partitionSoftDeletable([noCpm]).blocked).toEqual([{ row: noCpm, missing: ['cpm'] }])
+  })
+
+  it('allows both halves set and both halves absent', () => {
+    const both = fixtureScreen({ id: 4716, cpm: 2.5, currency_code: 'EUR' })
+    const neither = fixtureScreen({ id: 4717 })
+    expect(partitionSoftDeletable([both, neither]).blocked).toEqual([])
   })
 })
 

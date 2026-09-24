@@ -12,7 +12,7 @@ import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError } from '../utils/formatApiError.js'
-import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, screensQuery, labelBatchErrors } from '../utils/screenStatus.js'
+import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, PATH_OWNED_KEYS, screensQuery, labelBatchErrors } from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -389,11 +389,14 @@ export default function PlacementDetail() {
     setSaveError('')
   }
 
+  // Trimmed, not a bare `=== ''`: player_id, venue_type_tax, country_code, city and
+  // allowed_content are `@NotBlank` upstream, so a whitespace-only value is rejected by
+  // `@Valid` — a MethodArgumentNotValidException with no handler upstream, i.e. a bare 500.
   function validateFields(values) {
     const errors = {}
     for (const field of REQUIRED_FIELDS) {
       const v = values[field]
-      if (v == null || v === '') errors[field] = true
+      if (v == null || String(v).trim() === '') errors[field] = true
     }
     return errors
   }
@@ -443,9 +446,13 @@ export default function PlacementDetail() {
     setSaveLoading(true)
     setSaveError('')
     const updated = coerceTypes(editValues)
+    // PATH_OWNED_KEYS are left out for the same reason the bulk soft delete leaves them out:
+    // upstream overwrites both from the path, and sending a drifted — or NULL-decoded-to-0 —
+    // value only earns a `placement.dooh.publisher.id.mismatch`.
     const payload = Object.fromEntries(
       Object.entries(updated).filter(([k, v]) =>
-        (v != null && v !== '') || (selectedScreen[k] != null && selectedScreen[k] !== '')
+        !PATH_OWNED_KEYS.includes(k) &&
+        ((v != null && v !== '') || (selectedScreen[k] != null && selectedScreen[k] !== ''))
       )
     )
     const body = { dooh_settings: [payload] }
