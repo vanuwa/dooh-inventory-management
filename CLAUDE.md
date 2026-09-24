@@ -111,8 +111,8 @@ Every route accepts the optional `X-Api-Env` header (`production` | `acceptance`
 | `components/map/` | Per-provider map bodies (`LeafletScreenMap`, `GoogleScreenMap`) + shared `ScreenPopupContent` |
 | `hooks/` | `useDebounce`, `useReportTab`, `useRecentActivity`, `useVersionCheck` |
 | `styles/` | Shared inline-style objects (`tables.js`, `tabs.js`) — not CSS files |
-| `utils/dateUtils.js`, `utils/formatApiError.js`, `constants/pageTypes.js` | Date helpers, upstream error-body renderer, page-type badge constants |
-| `utils/screenStatus.js` | Every screen-`status` decision as pure functions: `SCREEN_STATUS_OPTIONS`, `screenStatusBadge`, `softDeleteBody`, `PATH_OWNED_KEYS`, `partitionSoftDeletable`, `labelBatchErrors` |
+| `utils/dateUtils.js`, `utils/formatApiError.js`, `constants/pageTypes.js` | Date helpers, upstream error-body renderer (`formatApiError`, `labelBatchErrors`), page-type badge constants |
+| `utils/screenStatus.js` | Every screen-`status` decision as pure functions: `SCREEN_STATUS_OPTIONS`, `screenStatusBadge`, `softDeleteBody`, `PATH_OWNED_KEYS`, `partitionSoftDeletable` |
 | `constants/apiEnvironments.js`, `utils/apiEnvironment.js` | Environment table (`API_ENVIRONMENTS`, `DEFAULT_API_ENV`) and its pure helpers (`isKnownApiEnv`, `scopedKey`, `apiEnvHost`, `apiEnvBanner`, `readApiEnv`, `writeApiEnv`, `readScoped`, `writeScoped`, `removeScoped`, `migrateLegacyKeys`) |
 
 ### Key Implementation Details
