@@ -174,7 +174,7 @@ func (h *ReportHandler) PlacementReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/preview", accessToken, body, "application/json")
+	respBody, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodPost, "/report/preview", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -212,7 +212,7 @@ func (h *ReportHandler) GeneratePlacementReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/generation", accessToken, body, "application/json")
+	respBody, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodPost, "/report/generation", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -257,7 +257,7 @@ func (h *ReportHandler) PublisherReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/preview", accessToken, body, "application/json")
+	respBody, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodPost, "/report/preview", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -300,7 +300,7 @@ func (h *ReportHandler) GeneratePublisherReport(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/report/generation", accessToken, body, "application/json")
+	respBody, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodPost, "/report/generation", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -313,7 +313,7 @@ func (h *ReportHandler) PlacementReportStatus(w http.ResponseWriter, r *http.Req
 	reportGenerationId := r.PathValue("reportGenerationId")
 	accessToken := r.Header.Get("X-Access-Token")
 
-	respBody, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/report/generation-status/"+reportGenerationId, accessToken, nil, "")
+	respBody, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, "/report/generation-status/"+reportGenerationId, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return

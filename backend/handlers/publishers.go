@@ -215,7 +215,7 @@ func (h *PublishersHandler) Publishers(w http.ResponseWriter, r *http.Request) {
 
 	upstreamPath := "/admin/v1/publishers?" + params.Encode()
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, upstreamPath, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -248,7 +248,7 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 
 	path := "/admin/v1/publishers/" + id
 
-	body, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
+	body, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -284,7 +284,7 @@ func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.R
 
 	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements?%s", id, params.Encode())
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -315,6 +315,7 @@ func (h *PublishersHandler) GetPublisherPlacement(w http.ResponseWriter, r *http
 	publisherID := r.PathValue("id")
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
+	base := upstreamBaseURL(h.cfg, r)
 
 	// Call 1: search the v2 placements list by placement ID — returns full placement data
 	// including inventory_name, inventory_id, inventory_platform_type_name.
@@ -324,7 +325,7 @@ func (h *PublishersHandler) GetPublisherPlacement(w http.ResponseWriter, r *http
 	path := fmt.Sprintf("/publisher/v2/publishers/%s/placements?%s",
 		url.PathEscape(publisherID), params.Encode())
 
-	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, path, accessToken, nil, "")
+	body, status, _, err := doRequest(base, http.MethodGet, path, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -360,7 +361,7 @@ func (h *PublishersHandler) GetPublisherPlacement(w http.ResponseWriter, r *http
 	if found.InventoryID != 0 {
 		invPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d",
 			url.PathEscape(publisherID), found.InventoryID)
-		invBody, invStatus, _, invErr := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, invPath, accessToken, nil, "")
+		invBody, invStatus, _, invErr := doRequest(base, http.MethodGet, invPath, accessToken, nil, "")
 		if invErr == nil && invStatus == http.StatusOK {
 			var inv inventoryDetailUpstream
 			if json.Unmarshal(invBody, &inv) == nil {
@@ -375,7 +376,7 @@ func (h *PublishersHandler) GetPublisherPlacement(w http.ResponseWriter, r *http
 	if found.InventoryID != 0 && found.ZoneID != 0 {
 		plDetailPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d/placements/%s",
 			url.PathEscape(publisherID), found.InventoryID, found.ZoneID, placementID)
-		plDetailBody, plDetailStatus, _, plDetailErr := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, plDetailPath, accessToken, nil, "")
+		plDetailBody, plDetailStatus, _, plDetailErr := doRequest(base, http.MethodGet, plDetailPath, accessToken, nil, "")
 		if plDetailErr == nil && plDetailStatus == http.StatusOK {
 			var plDetail placementDetailUpstream
 			if json.Unmarshal(plDetailBody, &plDetail) == nil {
@@ -407,7 +408,7 @@ func (h *PublishersHandler) GetPlacementDoohSettings(w http.ResponseWriter, r *h
 		params.Set("status", status)
 	}
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath+"?"+params.Encode(), accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, upstreamPath+"?"+params.Encode(), accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -456,7 +457,7 @@ func (h *PublishersHandler) PublisherUsers(w http.ResponseWriter, r *http.Reques
 		params.Set("active", active)
 	}
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v2/users?"+params.Encode(), accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, "/admin/v2/users?"+params.Encode(), accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -505,7 +506,7 @@ func (h *PublishersHandler) GetPlacementDoohSettingItem(w http.ResponseWriter, r
 	upstreamPath := fmt.Sprintf("/publisher/v1/placements/%s/dooh-settings/%s",
 		url.PathEscape(placementID), url.PathEscape(screenID))
 
-	body, status, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken, nil, "")
+	body, status, _, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, upstreamPath, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -702,7 +703,7 @@ func (h *PublishersHandler) CreatePublisherUser(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	respBody, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, "/admin/v2/users", accessToken, body, "application/json")
+	respBody, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodPost, "/admin/v2/users", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -728,7 +729,7 @@ func (h *PublishersHandler) GetPublisherUser(w http.ResponseWriter, r *http.Requ
 	userID := r.PathValue("userId")
 	accessToken := r.Header.Get("X-Access-Token")
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v2/users/"+userID, accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, "/admin/v2/users/"+userID, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -778,6 +779,7 @@ type updateUserRequest struct {
 func (h *PublishersHandler) UpdatePublisherUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("userId")
 	accessToken := r.Header.Get("X-Access-Token")
+	base := upstreamBaseURL(h.cfg, r)
 
 	var req updateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -798,7 +800,7 @@ func (h *PublishersHandler) UpdatePublisherUser(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	fetched, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v2/users/"+userID, accessToken, nil, "")
+	fetched, status, upHeaders, err := doRequest(base, http.MethodGet, "/admin/v2/users/"+userID, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -856,7 +858,7 @@ func (h *PublishersHandler) UpdatePublisherUser(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	respBody, putStatus, putHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, "/admin/v2/users", accessToken, body, "application/json")
+	respBody, putStatus, putHeaders, err := doRequest(base, http.MethodPut, "/admin/v2/users", accessToken, body, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -882,6 +884,7 @@ type createPlacementRequest struct {
 func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *http.Request) {
 	publisherID := r.PathValue("id")
 	accessToken := r.Header.Get("X-Access-Token")
+	base := upstreamBaseURL(h.cfg, r)
 
 	var req createPlacementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -922,7 +925,7 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 		return
 	}
 	invPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories", url.PathEscape(publisherID))
-	invResp, invStatus, invHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, invPath, accessToken, invBody, "application/json")
+	invResp, invStatus, invHeaders, err := doRequest(base, http.MethodPost, invPath, accessToken, invBody, "application/json")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -948,10 +951,10 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 	cleanup := func() {
 		if zoneID != 0 {
 			delZone := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d", safePub, inventoryID, zoneID)
-			doRequest(h.cfg.ImproveAPIBaseURL, http.MethodDelete, delZone, accessToken, nil, "") //nolint:errcheck
+			doRequest(base, http.MethodDelete, delZone, accessToken, nil, "") //nolint:errcheck
 		}
 		delInv := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d", safePub, inventoryID)
-		doRequest(h.cfg.ImproveAPIBaseURL, http.MethodDelete, delInv, accessToken, nil, "") //nolint:errcheck
+		doRequest(base, http.MethodDelete, delInv, accessToken, nil, "") //nolint:errcheck
 	}
 
 	// Step 2: Create zone
@@ -963,7 +966,7 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 		return
 	}
 	zonePath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones", safePub, inventoryID)
-	zoneResp, zoneStatus, zoneHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, zonePath, accessToken, zoneBody, "application/json")
+	zoneResp, zoneStatus, zoneHeaders, err := doRequest(base, http.MethodPost, zonePath, accessToken, zoneBody, "application/json")
 	if err != nil {
 		cleanup()
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
@@ -999,7 +1002,7 @@ func (h *PublishersHandler) CreatePublisherPlacement(w http.ResponseWriter, r *h
 		return
 	}
 	plPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d/placements", safePub, inventoryID, zoneID)
-	plResp, plStatus, plHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, plPath, accessToken, plBody, "application/json")
+	plResp, plStatus, plHeaders, err := doRequest(base, http.MethodPost, plPath, accessToken, plBody, "application/json")
 	if err != nil {
 		cleanup()
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
@@ -1025,6 +1028,7 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	publisherID := r.PathValue("id")
 	placementID := r.PathValue("placementId")
 	accessToken := r.Header.Get("X-Access-Token")
+	base := upstreamBaseURL(h.cfg, r)
 
 	var req updatePlacementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1049,7 +1053,7 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	params.Set("limit", "100")
 	searchPath := fmt.Sprintf("/publisher/v2/publishers/%s/placements?%s",
 		url.PathEscape(publisherID), params.Encode())
-	searchBody, searchStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, searchPath, accessToken, nil, "")
+	searchBody, searchStatus, _, err := doRequest(base, http.MethodGet, searchPath, accessToken, nil, "")
 	if err != nil || searchStatus != http.StatusOK {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to fetch placement")
 		return
@@ -1083,7 +1087,7 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	invPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d", safePub, found.InventoryID)
 
 	// Fetch the full current inventory so the PUT doesn't wipe fields we aren't changing.
-	invGetBody, invGetStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, invPath, accessToken, nil, "")
+	invGetBody, invGetStatus, _, err := doRequest(base, http.MethodGet, invPath, accessToken, nil, "")
 	if err != nil || invGetStatus != http.StatusOK {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to fetch inventory")
 		return
@@ -1104,7 +1108,7 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to build inventory payload")
 		return
 	}
-	_, invStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, invPath, accessToken, invPayload, "application/json")
+	_, invStatus, _, err := doRequest(base, http.MethodPut, invPath, accessToken, invPayload, "application/json")
 	if err != nil || invStatus < 200 || invStatus >= 300 {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to update inventory")
 		return
@@ -1113,7 +1117,7 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	// Fetch the full current placement so the PUT doesn't wipe fields we aren't changing.
 	plPath := fmt.Sprintf("/publisher/v1/publishers/%s/inventories/%d/zones/%d/placements/%s",
 		safePub, found.InventoryID, found.ZoneID, url.PathEscape(placementID))
-	plGetBody, plGetStatus, _, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, plPath, accessToken, nil, "")
+	plGetBody, plGetStatus, _, err := doRequest(base, http.MethodGet, plPath, accessToken, nil, "")
 	if err != nil || plGetStatus != http.StatusOK {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to fetch placement detail")
 		return
@@ -1136,7 +1140,7 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to build placement payload")
 		return
 	}
-	plResp, plStatus, plHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPut, plPath, accessToken, plPayload, "application/json")
+	plResp, plStatus, plHeaders, err := doRequest(base, http.MethodPut, plPath, accessToken, plPayload, "application/json")
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadGateway, "upstream request failed")
 		return
@@ -1163,7 +1167,7 @@ func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Req
 		}
 		contentType = "application/json"
 	}
-	respBody, status, respHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, method, upstreamPath, accessToken, bodyBytes, contentType)
+	respBody, status, respHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), method, upstreamPath, accessToken, bodyBytes, contentType)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return

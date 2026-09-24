@@ -102,7 +102,7 @@ func (h *DoohMetadataHandler) DoohMetadata(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Fix #2: capture upHeaders so we can forward the upstream body on non-200.
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, "/admin/v1/dooh-metadata?"+params.Encode(), accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, "/admin/v1/dooh-metadata?"+params.Encode(), accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return

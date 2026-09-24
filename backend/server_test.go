@@ -60,6 +60,36 @@ func appServer(t *testing.T, upstreamURL string) *httptest.Server {
 	return s
 }
 
+// appServerEnvs builds the application handler with two upstream instances configured, so
+// a test can assert which one a request actually reached.
+func appServerEnvs(t *testing.T, prodURL, acceptanceURL string) *httptest.Server {
+	t.Helper()
+	cfg := &config.Config{
+		Environments: map[string]config.Environment{
+			config.EnvProduction: {
+				Name:         config.EnvProduction,
+				BaseURL:      prodURL,
+				ClientID:     "test-client-id",
+				ClientSecret: "test-client-secret",
+			},
+			config.EnvAcceptance: {
+				Name:         config.EnvAcceptance,
+				BaseURL:      acceptanceURL,
+				ClientID:     "test-client-id",
+				ClientSecret: "test-client-secret",
+			},
+		},
+		ImproveAPIBaseURL:   prodURL,
+		ImproveClientID:     "test-client-id",
+		ImproveClientSecret: "test-client-secret",
+		FrontendOrigin:      "http://localhost:3000",
+		Port:                "0",
+	}
+	s := httptest.NewServer(newHandler(cfg))
+	t.Cleanup(s.Close)
+	return s
+}
+
 // --- Auth ---
 
 func TestLogin_Success(t *testing.T) {
@@ -1179,6 +1209,130 @@ func TestCORS_PreflightAdvertisesApiEnvHeader(t *testing.T) {
 	}
 	if got := resp.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(got, "X-Api-Env") {
 		t.Errorf("Access-Control-Allow-Headers: want it to contain X-Api-Env, got %q", got)
+	}
+}
+
+func TestApiEnv_AcceptanceHeaderRoutesToAcceptanceUpstream(t *testing.T) {
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("production upstream must not be called for X-Api-Env: acceptance")
+			w.Write([]byte(mockPublisherListBody))
+		},
+	})
+	acceptanceCalled := false
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, r *http.Request) {
+			acceptanceCalled = true
+			if got := r.Header.Get("X-Api-Env"); got != "" {
+				t.Errorf("X-Api-Env must not be forwarded upstream, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherListBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("X-Api-Env", "acceptance")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !acceptanceCalled {
+		t.Error("upstream: want the acceptance mock to be called, it was not")
+	}
+}
+
+func TestApiEnv_PublishersWithoutHeaderRouteToProduction(t *testing.T) {
+	productionCalled := false
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
+			productionCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherListBody))
+		},
+	})
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("acceptance upstream must not be called without X-Api-Env")
+			w.Write([]byte(mockPublisherListBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !productionCalled {
+		t.Error("upstream: want the production mock to be called, it was not")
+	}
+}
+
+// TestApiEnv_WriteRouteHonoursAcceptance covers a write path: the read-only allowlist is
+// keyed by path, so it must still admit the delete regardless of which environment the
+// request selects.
+func TestApiEnv_WriteRouteHonoursAcceptance(t *testing.T) {
+	const respBody = `{"dooh_settings":[{"id":1,"player_id":"p1"},{"id":2,"player_id":"p2"}]}`
+
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("production upstream must not be called for X-Api-Env: acceptance")
+			w.Write([]byte(respBody))
+		},
+	})
+	var gotMethod, gotQuery string
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(respBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	req, _ := http.NewRequest(http.MethodDelete,
+		app.URL+"/api/publishers/42/placements/101/dooh-settings?ids=1,2", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("X-Api-Env", "acceptance")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Errorf("acceptance upstream method: want DELETE, got %s", gotMethod)
+	}
+	if gotQuery != "ids=1,2" {
+		t.Errorf("acceptance upstream query: want %q, got %q", "ids=1,2", gotQuery)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	if string(got) != respBody {
+		t.Errorf("body: want %s, got %s", respBody, got)
 	}
 }
 

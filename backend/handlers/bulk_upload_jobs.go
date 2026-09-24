@@ -73,7 +73,7 @@ func (h *BulkUploadJobsHandler) ListJobs(w http.ResponseWriter, r *http.Request)
 
 	upstreamPath := fmt.Sprintf("/publisher/v1/publishers/%s/bulk-upload-jobs?%s", publisherID, params.Encode())
 
-	body, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodGet, upstreamPath, accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, upstreamPath, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -115,7 +115,7 @@ func (h *BulkUploadJobsHandler) CreateJob(w http.ResponseWriter, r *http.Request
 
 	upstreamPath := fmt.Sprintf("/publisher/v1/publishers/%s/bulk-upload-jobs", publisherID)
 
-	respBody, status, upHeaders, err := doRequest(h.cfg.ImproveAPIBaseURL, http.MethodPost, upstreamPath, accessToken, rawBody, contentType)
+	respBody, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodPost, upstreamPath, accessToken, rawBody, contentType)
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
