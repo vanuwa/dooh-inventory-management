@@ -5,9 +5,11 @@ import { modalStyles } from './CreateUserModal.jsx'
 import { tableStyles } from '../styles/tables.js'
 import { fmtPublisher } from '../utils/format.js'
 import { formatApiError } from '../utils/formatApiError.js'
+import { softDeleteBody, labelBatchErrors } from '../utils/screenStatus.js'
 
 export default function DeleteScreensModal({ screens, publisherId, placementId, publisherName, onClose, onDeleted }) {
   const [checked, setChecked] = useState(() => new Set(screens.map(sc => sc.id)))
+  const [hardDelete, setHardDelete] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const headerCbRef = useRef(null)
@@ -37,18 +39,25 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
     if (submitting || checked.size === 0) return
     setSubmitting(true)
     setError('')
-    const ids = [...checked]
+    // Built once and used for both the request and the error labelling: upstream keys batch
+    // errors by the row's position in the array we sent, so a second, separately built array
+    // could name the wrong screen.
+    const rows = screens.filter(sc => checked.has(sc.id))
+    const ids = rows.map(sc => sc.id)
+    const path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings`
     let ok = false
     try {
-      const res = await apiFetch(
-        `/publishers/${publisherId}/placements/${placementId}/dooh-settings?ids=${ids.join(',')}`,
-        { method: 'DELETE' }
-      )
+      const res = hardDelete
+        ? await apiFetch(`${path}?ids=${ids.join(',')}`, { method: 'DELETE' })
+        : await apiFetch(path, { method: 'PUT', body: JSON.stringify(softDeleteBody(rows)) })
       if (res.ok) {
         ok = true
       } else {
         const errData = await res.json().catch(() => ({}))
-        setError(formatApiError(errData, `Delete failed (${res.status})`))
+        // Only the soft delete is labelled: upstream reports hard-delete failures against
+        // `ids`, not an array index, so that body is rendered exactly as it is today.
+        const body = hardDelete ? errData : labelBatchErrors(errData, rows)
+        setError(formatApiError(body, `Delete failed (${res.status})`))
       }
     } catch (err) {
       if (err.message !== 'Unauthorized') setError('Delete failed.')
@@ -58,6 +67,9 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
       if (bodyRef.current) bodyRef.current.scrollTop = 0
       return
     }
+    // Same contract in both modes: drop the ids from the selection and refetch from page 1.
+    // Under "All" and "Deleted only" the soft-deleted rows legitimately stay in the grid
+    // after that refetch, now unselected and wearing the Deleted badge — that is correct.
     onDeleted(ids)
   }
 
@@ -69,7 +81,11 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
           <button style={s.closeBtn} onClick={onClose} aria-label="Close" disabled={submitting}>×</button>
         </div>
 
-        <p style={s.warning}>This permanently deletes the screens below. This cannot be undone.</p>
+        <p style={s.warning}>
+          {hardDelete
+            ? 'This permanently deletes the screens below. This cannot be undone.'
+            : 'This marks the screens below as deleted. They stop serving and are hidden from the default view, and can be restored by setting the status back to active.'}
+        </p>
 
         <div style={s.modalBody} ref={bodyRef}>
           {error && <p style={s.error}>{error}</p>}
@@ -116,6 +132,16 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
           </table>
         </div>
 
+        <label style={s.hardDeleteRow}>
+          <input
+            type="checkbox"
+            checked={hardDelete}
+            onChange={e => setHardDelete(e.target.checked)}
+            disabled={submitting}
+          />
+          Permanently delete instead (cannot be undone)
+        </label>
+
         <div style={s.modalFooter}>
           <button style={s.cancelBtn} onClick={onClose} disabled={submitting}>Cancel</button>
           <button
@@ -140,6 +166,7 @@ const s = {
   // one upstream message per offending id, so this can run to hundreds of lines: keep it bounded and scrollable
   error: { ...modalStyles.error, fontSize: '0.8125rem', marginTop: 0, marginBottom: '0.75rem', whiteSpace: 'pre-line', maxHeight: '30vh', overflowY: 'auto' },
   warning: { margin: '0 0 1rem', fontSize: '0.875rem', color: '#374151', flexShrink: 0 },
+  hardDeleteRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.75rem 0 0', fontSize: '0.875rem', color: '#374151', cursor: 'pointer', flexShrink: 0 },
   table: { width: '100%', borderCollapse: 'collapse' },
   // the shared compact cells, tightened for the dialog: no page-grid padding, no column min-width
   th: { ...tableStyles.thCompact, padding: '0.5rem 0.75rem', minWidth: undefined },
