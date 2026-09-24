@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useVersionCheck } from '../hooks/useVersionCheck.js'
+import { API_ENVIRONMENTS, DEFAULT_API_ENV } from '../constants/apiEnvironments.js'
 
 function UserAvatar() {
   return (
@@ -15,12 +16,13 @@ function UserAvatar() {
 }
 
 export default function Layout({ user, children }) {
-  const { logout } = useAuth()
+  const { logout, apiEnv, switchApiEnv } = useAuth()
   const navigate = useNavigate()
   const isOutdated = useVersionCheck()
   const [dismissed, setDismissed] = useState(false)
 
   const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
+  const activeEnv = API_ENVIRONMENTS.find(e => e.name === apiEnv)
 
   function handleLogout() {
     logout()
@@ -41,6 +43,16 @@ export default function Layout({ user, children }) {
           </nav>
         </div>
         <div style={s.headerRight}>
+          <select
+            aria-label="API environment"
+            style={s.envSelect}
+            value={apiEnv}
+            onChange={e => switchApiEnv(e.target.value)}
+          >
+            {API_ENVIRONMENTS.map(env => (
+              <option key={env.name} value={env.name}>{env.label}</option>
+            ))}
+          </select>
           {user && (
             <>
               <UserAvatar />
@@ -51,6 +63,11 @@ export default function Layout({ user, children }) {
           <button style={s.logoutBtn} onClick={handleLogout}>Logout</button>
         </div>
       </header>
+      {apiEnv !== DEFAULT_API_ENV && activeEnv && (
+        <div style={s.envBanner}>
+          {activeEnv.label} environment — {activeEnv.host}
+        </div>
+      )}
       {isOutdated && !dismissed && (
         <div style={s.updateBanner}>
           <span>
@@ -95,6 +112,25 @@ const s = {
   },
   userName: { fontSize: '0.875rem', color: '#e2e8f0', fontWeight: 500, textDecoration: 'none' },
   vDivider: { display: 'inline-block', width: 1, height: 20, background: 'rgba(255,255,255,0.2)' },
+  envSelect: {
+    padding: '0.3125rem 0.5rem',
+    background: '#1a1a2e',
+    color: '#e2e8f0',
+    border: '1px solid rgba(255,255,255,0.3)',
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontSize: '0.8125rem',
+  },
+  // Deliberately warmer than the amber updateBanner below: both can be on
+  // screen at once and an acceptance session must never read as production.
+  envBanner: {
+    padding: '0.6rem 1.5rem',
+    background: '#fff7ed',
+    borderBottom: '1px solid #fb923c',
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    color: '#7c2d12',
+  },
   updateBanner: {
     display: 'flex',
     justifyContent: 'space-between',
