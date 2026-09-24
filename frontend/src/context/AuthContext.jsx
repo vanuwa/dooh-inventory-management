@@ -1,7 +1,9 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { setUnauthorizedHandler } from '../api.js'
 import {
+  ACCESS_TOKEN_KEY,
   API_ENV_KEY,
+  REFRESH_TOKEN_KEY,
   readApiEnv,
   readScoped,
   removeScoped,
@@ -13,8 +15,8 @@ const AuthContext = createContext(null)
 
 function readTokens(env) {
   return {
-    accessToken: readScoped('access_token', env),
-    refreshToken: readScoped('refresh_token', env),
+    accessToken: readScoped(ACCESS_TOKEN_KEY, env),
+    refreshToken: readScoped(REFRESH_TOKEN_KEY, env),
   }
 }
 
@@ -26,14 +28,14 @@ export function AuthProvider({ children }) {
   const [tokens, setTokens] = useState(() => readTokens(readApiEnv()))
 
   const logout = useCallback(() => {
-    removeScoped('access_token', apiEnv)
-    removeScoped('refresh_token', apiEnv)
+    removeScoped(ACCESS_TOKEN_KEY, apiEnv)
+    removeScoped(REFRESH_TOKEN_KEY, apiEnv)
     setTokens({ accessToken: null, refreshToken: null })
   }, [apiEnv])
 
   const login = useCallback((accessToken, refreshToken) => {
-    writeScoped('access_token', apiEnv, accessToken)
-    writeScoped('refresh_token', apiEnv, refreshToken)
+    writeScoped(ACCESS_TOKEN_KEY, apiEnv, accessToken)
+    writeScoped(REFRESH_TOKEN_KEY, apiEnv, refreshToken)
     setTokens({ accessToken, refreshToken })
   }, [apiEnv])
 

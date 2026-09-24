@@ -1,4 +1,10 @@
-import { readApiEnv, readScoped, writeScoped } from './utils/apiEnvironment.js'
+import {
+  ACCESS_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+  readApiEnv,
+  readScoped,
+  writeScoped,
+} from './utils/apiEnvironment.js'
 
 let onUnauthorized = null
 let pendingRefresh = null
@@ -12,7 +18,7 @@ async function refreshTokens() {
   // Resolved per call, never captured: a switch reloads the page, but a stale
   // value here would spend one environment's refresh token on the other.
   const env = readApiEnv()
-  const refreshToken = readScoped('refresh_token', env)
+  const refreshToken = readScoped(REFRESH_TOKEN_KEY, env)
   if (!refreshToken) return false
 
   const doRefresh = async () => {
@@ -24,9 +30,9 @@ async function refreshTokens() {
       })
       if (!res.ok) return false
       const data = await res.json()
-      writeScoped('access_token', env, data.access_token)
+      writeScoped(ACCESS_TOKEN_KEY, env, data.access_token)
       if (data.refresh_token) {
-        writeScoped('refresh_token', env, data.refresh_token)
+        writeScoped(REFRESH_TOKEN_KEY, env, data.refresh_token)
       }
       return true
     } catch {
@@ -42,7 +48,7 @@ async function refreshTokens() {
 
 export async function apiFetch(path, options = {}, _retried = false) {
   const env = readApiEnv()
-  const accessToken = readScoped('access_token', env)
+  const accessToken = readScoped(ACCESS_TOKEN_KEY, env)
 
   const headers = {}
   if (!(options.body instanceof FormData)) {

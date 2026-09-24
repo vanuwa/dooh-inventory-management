@@ -1,10 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import {
+  ACCESS_TOKEN_KEY,
   apiEnvBanner,
+  apiEnvHost,
   isKnownApiEnv,
   scopedKey,
   readApiEnv,
+  readScoped,
+  removeScoped,
   writeApiEnv,
+  writeScoped,
   migrateLegacyKeys,
 } from './apiEnvironment.js'
 import { DEFAULT_API_ENV } from '../constants/apiEnvironments.js'
@@ -48,6 +53,18 @@ describe('DEFAULT_API_ENV', () => {
     // If it ever drifts the proxy answers 400 for every request and the accent
     // strip is suppressed, because every environment then looks like the default.
     expect(isKnownApiEnv(DEFAULT_API_ENV)).toBe(true)
+  })
+})
+
+describe('apiEnvHost', () => {
+  it('returns the configured host of a known environment', () => {
+    expect(apiEnvHost('production')).toBe('api.360yield.com')
+    expect(apiEnvHost('acceptance')).toBe('api.360yielddev.com')
+  })
+
+  it('returns null for an unknown environment, so callers render nothing', () => {
+    expect(apiEnvHost('bogus')).toBeNull()
+    expect(apiEnvHost(undefined)).toBeNull()
   })
 })
 
@@ -106,6 +123,46 @@ describe('writeApiEnv', () => {
 
   it('does not throw when storage throws', () => {
     expect(() => writeApiEnv('acceptance', throwingStorage())).not.toThrow()
+  })
+})
+
+describe('readScoped / writeScoped / removeScoped', () => {
+  it('reads and writes under the environment-scoped key', () => {
+    const storage = stubStorage()
+    writeScoped(ACCESS_TOKEN_KEY, 'acceptance', 'acc-token', storage)
+    expect(storage.data['access_token:acceptance']).toBe('acc-token')
+    expect(readScoped(ACCESS_TOKEN_KEY, 'acceptance', storage)).toBe('acc-token')
+  })
+
+  it('keeps the two environments apart', () => {
+    const storage = stubStorage()
+    writeScoped(ACCESS_TOKEN_KEY, 'production', 'prod-token', storage)
+    writeScoped(ACCESS_TOKEN_KEY, 'acceptance', 'acc-token', storage)
+    expect(readScoped(ACCESS_TOKEN_KEY, 'production', storage)).toBe('prod-token')
+    expect(readScoped(ACCESS_TOKEN_KEY, 'acceptance', storage)).toBe('acc-token')
+  })
+
+  it('returns null for a key that was never written', () => {
+    expect(readScoped(ACCESS_TOKEN_KEY, 'production', stubStorage())).toBeNull()
+  })
+
+  it('removes only the scoped key of the given environment', () => {
+    const storage = stubStorage({
+      'access_token:production': 'prod-token',
+      'access_token:acceptance': 'acc-token',
+    })
+    removeScoped(ACCESS_TOKEN_KEY, 'production', storage)
+    expect(readScoped(ACCESS_TOKEN_KEY, 'production', storage)).toBeNull()
+    expect(readScoped(ACCESS_TOKEN_KEY, 'acceptance', storage)).toBe('acc-token')
+  })
+
+  it('degrades instead of throwing when storage throws', () => {
+    // The first token read runs in a useState initialiser during the very first
+    // render, where a throw would blank the app rather than log the user out.
+    const storage = throwingStorage()
+    expect(readScoped(ACCESS_TOKEN_KEY, 'production', storage)).toBeNull()
+    expect(() => writeScoped(ACCESS_TOKEN_KEY, 'production', 'x', storage)).not.toThrow()
+    expect(() => removeScoped(ACCESS_TOKEN_KEY, 'production', storage)).not.toThrow()
   })
 })
 
@@ -176,5 +233,11 @@ describe('default storage', () => {
 
   it('migrateLegacyKeys does not throw', () => {
     expect(() => migrateLegacyKeys()).not.toThrow()
+  })
+
+  it('the scoped helpers degrade to a no-op store', () => {
+    expect(readScoped(ACCESS_TOKEN_KEY, 'production')).toBeNull()
+    expect(() => writeScoped(ACCESS_TOKEN_KEY, 'production', 'x')).not.toThrow()
+    expect(() => removeScoped(ACCESS_TOKEN_KEY, 'production')).not.toThrow()
   })
 })

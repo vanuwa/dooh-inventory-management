@@ -69,6 +69,11 @@ cp .env.example .env   # if available, otherwise create it manually
 IMPROVE_CLIENT_ID=your_client_id
 IMPROVE_CLIENT_SECRET=your_client_secret
 
+# Optional — point either environment at a different upstream; compose.yaml falls
+# back to these values when they are unset
+#IMPROVE_API_BASE_URL=https://api.360yield.com
+#IMPROVE_ACCEPTANCE_API_BASE_URL=https://api.360yielddev.com
+
 # Optional — enables the Google Maps basemap on the DOOH Metadata map tab
 GOOGLE_MAPS_API_KEY=your_google_maps_browser_key
 GOOGLE_MAPS_MAP_ID=your_cloud_map_id

@@ -3,9 +3,24 @@ import { API_ENVIRONMENTS, DEFAULT_API_ENV } from '../constants/apiEnvironments.
 // The selected environment itself is not scoped — it *is* the selection.
 export const API_ENV_KEY = 'api_env'
 
+// Per-environment key names, exported so the modules that read and write them and the
+// migration table below cannot drift apart: renaming one here renames it everywhere.
+export const ACCESS_TOKEN_KEY = 'access_token'
+export const REFRESH_TOKEN_KEY = 'refresh_token'
+export const RECENT_ACTIVITY_KEY = 'dooh_recent_activity'
+
 // Unscoped keys written before the environment switcher existed. They all held
 // production data, so a one-time migration moves them to ':production'.
-const LEGACY_KEYS = ['access_token', 'refresh_token', 'dooh_recent_activity']
+const LEGACY_KEYS = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, RECENT_ACTIVITY_KEY]
+
+// Stand-in for a store we cannot touch. Returning it rather than null keeps every
+// helper below a plain try/catch around real storage exceptions, instead of reaching
+// the fallback by dereferencing null and letting the TypeError be swallowed.
+const NO_STORAGE = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+}
 
 // Resolved by a call rather than a default parameter: merely *touching* localStorage
 // throws where site data is blocked (Safari private mode, sandboxed iframe), and a
@@ -15,12 +30,16 @@ function defaultStorage() {
   try {
     return localStorage
   } catch {
-    return null
+    return NO_STORAGE
   }
 }
 
+function findApiEnv(name) {
+  return API_ENVIRONMENTS.find(e => e.name === name) ?? null
+}
+
 export function isKnownApiEnv(name) {
-  return API_ENVIRONMENTS.some(e => e.name === name)
+  return findApiEnv(name) !== null
 }
 
 // Namespaces a storage key per environment: tokens and cached entity IDs from one
@@ -29,11 +48,17 @@ export function scopedKey(key, env) {
   return `${key}:${env}`
 }
 
+// The active environment's upstream host, or null when the name is unknown. The one
+// lookup for it: the login form's hint and the accent strip below both render it.
+export function apiEnvHost(env) {
+  return findApiEnv(env)?.host ?? null
+}
+
 // The chrome's environment identity: the text of the non-production accent strip, or
 // null when the active environment is the default one and no strip is shown. Pure, so
 // the "is this session visibly non-production?" decision is covered by the tests.
 export function apiEnvBanner(env) {
-  const active = API_ENVIRONMENTS.find(e => e.name === env)
+  const active = findApiEnv(env)
   if (!active || active.name === DEFAULT_API_ENV) return null
   return `${active.label} environment — ${active.host}`
 }
@@ -64,25 +89,25 @@ export function writeApiEnv(name, storage = defaultStorage()) {
 // Per-environment values (tokens, history) go through these rather than localStorage
 // directly: the first read happens in a useState initialiser during the very first
 // render, where an unguarded throw would blank the app instead of degrading.
-export function readScoped(key, env) {
+export function readScoped(key, env, storage = defaultStorage()) {
   try {
-    return defaultStorage().getItem(scopedKey(key, env))
+    return storage.getItem(scopedKey(key, env))
   } catch {
     return null
   }
 }
 
-export function writeScoped(key, env, value) {
+export function writeScoped(key, env, value, storage = defaultStorage()) {
   try {
-    defaultStorage().setItem(scopedKey(key, env), value)
+    storage.setItem(scopedKey(key, env), value)
   } catch {
     // ignore — the value simply does not survive a reload
   }
 }
 
-export function removeScoped(key, env) {
+export function removeScoped(key, env, storage = defaultStorage()) {
   try {
-    defaultStorage().removeItem(scopedKey(key, env))
+    storage.removeItem(scopedKey(key, env))
   } catch {
     // ignore — a store we cannot write to holds nothing to remove
   }

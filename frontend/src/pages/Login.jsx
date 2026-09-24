@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { API_ENVIRONMENTS } from '../constants/apiEnvironments.js'
+import { apiEnvHost } from '../utils/apiEnvironment.js'
 
 export default function Login() {
   // Layout (and its switcher) is not rendered on /login, so the form carries its own
@@ -14,7 +15,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const apiEnvHost = API_ENVIRONMENTS.find(e => e.name === apiEnv)?.host
+  const host = apiEnvHost(apiEnv)
 
   if (isAuthenticated) return <Navigate to="/recent" replace />
 
@@ -59,7 +60,7 @@ export default function Login() {
               <option key={env.name} value={env.name}>{env.label}</option>
             ))}
           </select>
-          {apiEnvHost && <p style={s.hostNote}>{apiEnvHost}</p>}
+          {host && <p style={s.hostNote}>{host}</p>}
           <label style={s.label}>Username</label>
           <input
             style={s.input}
