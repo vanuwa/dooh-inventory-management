@@ -7,6 +7,7 @@ services:
       - "8080:8080"
     environment:
       - IMPROVE_API_BASE_URL=https://api.360yield.com
+      - IMPROVE_ACCEPTANCE_API_BASE_URL=https://api.360yielddev.com
       - IMPROVE_CLIENT_ID=${IMPROVE_CLIENT_ID}
       - IMPROVE_CLIENT_SECRET=${IMPROVE_CLIENT_SECRET}
       - FRONTEND_ORIGIN=http://localhost:3000
