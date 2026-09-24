@@ -1267,6 +1267,42 @@ func TestApiEnv_PublishersWithoutHeaderRouteToProduction(t *testing.T) {
 	}
 }
 
+// TestApiEnv_ResponsesVaryOnApiEnvHeader pins the cache-safety header on both response
+// helpers: aggregated lists go out through writeJSON, proxied bodies through
+// writeProxyResponse, and both return different data per environment at the same URL.
+func TestApiEnv_ResponsesVaryOnApiEnvHeader(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/admin/v1/publishers": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherListBody))
+		},
+		"/common/v1/user-details": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUserBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	for _, path := range []string{"/api/publishers", "/api/user/details"} {
+		req, _ := http.NewRequest(http.MethodGet, app.URL+path, nil)
+		req.Header.Set("X-Access-Token", "mock-access-token")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status: want 200, got %d", path, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Vary"); got != "X-Api-Env" {
+			t.Errorf("%s Vary: want %q, got %q", path, "X-Api-Env", got)
+		}
+	}
+}
+
 // TestApiEnv_WriteRouteHonoursAcceptance covers a write path: the read-only allowlist is
 // keyed by path, so it must still admit the delete regardless of which environment the
 // request selects.

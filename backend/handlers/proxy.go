@@ -54,6 +54,9 @@ func (h *ProxyHandler) proxy(w http.ResponseWriter, r *http.Request, method, ups
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
+	// The same URL returns different data per environment, so no cache may reuse a
+	// response across a switch.
+	w.Header().Set("Vary", EnvHeader)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }
