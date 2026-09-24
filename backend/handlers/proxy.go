@@ -9,6 +9,27 @@ import (
 	"dooh-backend/config"
 )
 
+// EnvHeader names the upstream environment a request is addressed to.
+// An absent header means production.
+const EnvHeader = "X-Api-Env"
+
+// upstreamEnv resolves the upstream instance for this request. apiEnvMiddleware
+// rejects unknown names before routing, so the fallback here only matters for a
+// handler exercised outside the middleware chain — it degrades to production
+// rather than to a zero value with an empty base URL.
+func upstreamEnv(cfg *config.Config, r *http.Request) config.Environment {
+	if env, ok := cfg.Env(r.Header.Get(EnvHeader)); ok {
+		return env
+	}
+	env, _ := cfg.Env("")
+	return env
+}
+
+// upstreamBaseURL is the base URL of the environment this request selected.
+func upstreamBaseURL(cfg *config.Config, r *http.Request) string {
+	return upstreamEnv(cfg, r).BaseURL
+}
+
 // ProxyHandler proxies requests to the Improve Digital API.
 type ProxyHandler struct {
 	cfg *config.Config
@@ -27,7 +48,7 @@ func (h *ProxyHandler) UserDetails(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) proxy(w http.ResponseWriter, r *http.Request, method, upstreamPath string) {
 	accessToken := r.Header.Get("X-Access-Token")
 
-	body, status, headers, err := doRequest(h.cfg.ImproveAPIBaseURL, method, upstreamPath, accessToken, nil, "")
+	body, status, headers, err := doRequest(upstreamBaseURL(h.cfg, r), method, upstreamPath, accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return

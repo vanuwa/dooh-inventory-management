@@ -41,6 +41,14 @@ func mockUpstream(t *testing.T, routes map[string]http.HandlerFunc) *httptest.Se
 func appServer(t *testing.T, upstreamURL string) *httptest.Server {
 	t.Helper()
 	cfg := &config.Config{
+		Environments: map[string]config.Environment{
+			config.EnvProduction: {
+				Name:         config.EnvProduction,
+				BaseURL:      upstreamURL,
+				ClientID:     "test-client-id",
+				ClientSecret: "test-client-secret",
+			},
+		},
 		ImproveAPIBaseURL:   upstreamURL,
 		ImproveClientID:     "test-client-id",
 		ImproveClientSecret: "test-client-secret",
@@ -1085,6 +1093,92 @@ func TestCORS_PreflightAllowsDelete(t *testing.T) {
 	}
 	if got := resp.Header.Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodDelete) {
 		t.Errorf("Access-Control-Allow-Methods: want it to contain DELETE, got %q", got)
+	}
+}
+
+// --- API environment selection ---
+
+func TestApiEnv_UnknownEnvironmentIsRejected(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/common/v1/user-details": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream must not be called for an unknown environment")
+			w.Write([]byte(mockUserBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/user/details", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("X-Api-Env", "bogus")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "unknown api environment") {
+		t.Errorf("body: want it to mention the unknown environment, got %q", string(body))
+	}
+}
+
+func TestApiEnv_AbsentHeaderUsesProduction(t *testing.T) {
+	called := false
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/common/v1/user-details": func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			if got := r.Header.Get("X-Api-Env"); got != "" {
+				t.Errorf("X-Api-Env must not be forwarded upstream, got %q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUserBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/user/details", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !called {
+		t.Error("upstream: want the production mock to be called, it was not")
+	}
+}
+
+func TestCORS_PreflightAdvertisesApiEnvHeader(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodOptions, app.URL+"/api/user/details", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "X-Api-Env")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status: want 204, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(got, "X-Api-Env") {
+		t.Errorf("Access-Control-Allow-Headers: want it to contain X-Api-Env, got %q", got)
 	}
 }
 

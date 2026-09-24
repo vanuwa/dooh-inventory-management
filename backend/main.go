@@ -53,7 +53,23 @@ func newHandler(cfg *config.Config) http.Handler {
 	mux.HandleFunc("POST /api/publishers/{publisherId}/bulk-upload-jobs", bulkUploadJobsHandler.CreateJob)
 	mux.HandleFunc("GET /api/dooh-metadata", doohMetadataHandler.DoohMetadata)
 
-	return corsMiddleware(cfg.FrontendOrigin, readOnlyMiddleware(mux))
+	return corsMiddleware(cfg.FrontendOrigin, apiEnvMiddleware(cfg, readOnlyMiddleware(mux)))
+}
+
+// apiEnvMiddleware rejects a request naming an environment that is not configured.
+// An absent header is production, so an older cached bundle keeps working; a typo is
+// loud rather than silently talking to production.
+func apiEnvMiddleware(cfg *config.Config, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.Header.Get(handlers.EnvHeader)
+		if name != "" {
+			if _, ok := cfg.Env(name); !ok {
+				http.Error(w, "unknown api environment", http.StatusBadRequest)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // readOnlyMiddleware blocks all non-GET methods except on the paths listed in writeAllowed.
@@ -110,7 +126,7 @@ func corsMiddleware(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token, X-Api-Env")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
