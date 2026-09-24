@@ -107,14 +107,52 @@ function missingCurrencyPair(screen) {
   return []
 }
 
+// `PlacementDoohDto` carries four bounds beside its `@NotNull`/`@NotBlank` set, and they fail the
+// same way: they are bean-validation constraints, so they run at `@Valid @RequestBody` time, before
+// the controller body, and raise a MethodArgumentNotValidException that `ExceptionHandlerController`
+// has no `@ExceptionHandler` for — a bare 500 naming no screen, killing the whole all-or-nothing
+// batch. The values are copied from `PlacementDoohDto` / `DoohScreenFields` (both @DecimalMin and
+// @DecimalMax are inclusive by default, so exactly ±90 / ±180 / 0.0 pass):
+//
+//   lat        @DecimalMin("-90.0")  @DecimalMax("90.0")
+//   lon        @DecimalMin("-180.0") @DecimalMax("180.0")
+//   player_id  @Size(max = 255)
+//   cpm        @DecimalMin("0.0")
+//
+// Rows that violate them are not hypothetical: `BulkUploadPlacementDoohDtoBase` carries no
+// bean-validation annotations at all, so an xlsx-written row predating SSP-1117's shared
+// `validateSharedRules` can hold an out-of-range coordinate, a negative cpm or an over-length
+// player_id. One such row takes the whole PUT down, so — like the currency pair — decide it here
+// from data already in hand rather than in an unattributable 500.
+//
+// Only *present* values are tested: an absent lat/lon/player_id is `missingRequiredFields`'s call,
+// and an absent cpm is legal. A non-numeric value fails the bounds test and is reported here too —
+// the Go proxy types all three as numbers, so it cannot occur, and upstream's Jackson would reject
+// it just as flatly.
+const MAX_PLAYER_ID_LENGTH = 255
+const LAT_BOUNDS = [-90, 90]
+const LON_BOUNDS = [-180, 180]
+
+function outOfRangeFields(screen) {
+  const outOfRange = []
+  const inBounds = (value, [min, max]) => Number(value) >= min && Number(value) <= max
+  if (screen?.lat != null && screen.lat !== '' && !inBounds(screen.lat, LAT_BOUNDS)) outOfRange.push('lat')
+  if (screen?.lon != null && screen.lon !== '' && !inBounds(screen.lon, LON_BOUNDS)) outOfRange.push('lon')
+  if (String(screen?.player_id ?? '').length > MAX_PLAYER_ID_LENGTH) outOfRange.push('player_id')
+  if (screen?.cpm != null && screen.cpm !== '' && Number(screen.cpm) < 0) outOfRange.push('cpm')
+  return outOfRange
+}
+
 // Splits a selection into the rows the soft delete can carry and the rows it cannot. A row in
-// `blocked` has to be unticked; the permanent delete is not an escape hatch for it, because
-// that purges the whole ticked selection rather than the blocked rows alone.
+// `blocked` has to be unticked (or repaired through the edit dialog); the permanent delete is not
+// an escape hatch for it, because that purges the whole ticked selection rather than the blocked
+// rows alone. `missing` names the offending fields whatever the rule was — absent, blank, half a
+// cpm/currency pair or out of range — since the user's move is the same for all of them.
 export function partitionSoftDeletable(rows) {
   const deletable = []
   const blocked = []
   for (const row of rows) {
-    const missing = [...missingRequiredFields(row), ...missingCurrencyPair(row)]
+    const missing = [...missingRequiredFields(row), ...missingCurrencyPair(row), ...outOfRangeFields(row)]
     if (missing.length === 0) deletable.push(row)
     else blocked.push({ row, missing })
   }

@@ -244,6 +244,37 @@ describe('partitionSoftDeletable', () => {
     const neither = fixtureScreen({ id: 4717 })
     expect(partitionSoftDeletable([both, neither]).blocked).toEqual([])
   })
+
+  // The bean-validation bounds on PlacementDoohDto fail exactly like @NotNull/@NotBlank: at
+  // @Valid time, as a MethodArgumentNotValidException with no handler, i.e. a 500 naming no
+  // screen that takes the whole batch with it.
+  it('blocks a lat outside the WGS84 bounds, naming lat', () => {
+    const tooHigh = fixtureScreen({ id: 4718, lat: 90.5 })
+    const tooLow = fixtureScreen({ id: 4719, lat: -91 })
+    expect(partitionSoftDeletable([tooHigh]).blocked).toEqual([{ row: tooHigh, missing: ['lat'] }])
+    expect(partitionSoftDeletable([tooLow]).blocked).toEqual([{ row: tooLow, missing: ['lat'] }])
+  })
+
+  it('blocks a lon outside the WGS84 bounds, naming lon', () => {
+    const bad = fixtureScreen({ id: 4720, lon: 180.1 })
+    expect(partitionSoftDeletable([bad]).blocked).toEqual([{ row: bad, missing: ['lon'] }])
+  })
+
+  it('blocks a player_id longer than @Size(max = 255)', () => {
+    const bad = fixtureScreen({ id: 4721, player_id: 'p'.repeat(256) })
+    expect(partitionSoftDeletable([bad]).blocked).toEqual([{ row: bad, missing: ['player_id'] }])
+  })
+
+  it('blocks a negative cpm, which @DecimalMin("0.0") rejects', () => {
+    const bad = fixtureScreen({ id: 4722, cpm: -0.01, currency_code: 'EUR' })
+    expect(partitionSoftDeletable([bad]).blocked).toEqual([{ row: bad, missing: ['cpm'] }])
+  })
+
+  it('allows values at and inside the bounds — both @DecimalMin and @DecimalMax are inclusive', () => {
+    const edges = fixtureScreen({ id: 4723, lat: 90, lon: -180, cpm: 0, currency_code: 'EUR' })
+    const inside = fixtureScreen({ id: 4724, lat: 52.37, lon: 4.89, player_id: 'p'.repeat(255) })
+    expect(partitionSoftDeletable([edges, inside]).blocked).toEqual([])
+  })
 })
 
 describe('deleteRequest', () => {

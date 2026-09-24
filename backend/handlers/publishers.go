@@ -77,12 +77,27 @@ type publisherPlacementsResponse struct {
 	Limit      int                  `json:"limit"`
 }
 
-// PlacementDoohItem mirrors one upstream PlacementDoohDto. Every column that is nullable
-// upstream is a pointer here so an upstream NULL round-trips as JSON null rather than as a
-// zero value: lat/lon/resolution_width/resolution_height/venue_type_id are plain nullable
-// @Column(s) on the PlacementDooh entity, and decoding a NULL lat into a float64 would hand
-// the browser 0 — a valid WGS84 coordinate that the soft delete would then write back,
-// silently moving the screen to Null Island.
+// PlacementDoohItem mirrors one upstream PlacementDoohDto. Every nullable *numeric* column is
+// a pointer here, so an upstream NULL round-trips as JSON null rather than as a zero value:
+// lat/lon/resolution_width/resolution_height/venue_type_id/width/height/min_duration/
+// max_duration/avg_weekly_audience/cpm are plain nullable @Column(s) on the PlacementDooh
+// entity, and decoding a NULL lat into a float64 would hand the browser 0 — a valid WGS84
+// coordinate that the soft delete would then write back, silently moving the screen to Null
+// Island.
+//
+// The other fields are deliberately NOT pointers even though they are nullable upstream, and
+// the frontend compensates for each — so turning them into pointers is not a safe local
+// cleanup, it changes the wire shape the delete path is written against:
+//   - publisher_id / placement_id are plain int64, so an upstream NULL decodes to 0. That is
+//     precisely why utils/screenStatus.js drops them via PATH_OWNED_KEYS: "publisher_id": 0 is
+//     neither null nor "", it would survive the drop-empty filter, and upstream compares any
+//     non-null value against the path's owner and kills the whole all-or-nothing batch.
+//   - device_id, screen_img_url, region, zip, address, currency_code (and status) are plain
+//     non-omitempty strings, so an upstream NULL arrives as "". That is why softDeleteBody's
+//     drop-empty-string rule exists: without it a soft delete would rewrite those NULL columns
+//     as empty strings on every selected row.
+//
+// Changing either group to pointers would break both compensations at once.
 type PlacementDoohItem struct {
 	ID                int64    `json:"id"`
 	PublisherID       int64    `json:"publisher_id"`

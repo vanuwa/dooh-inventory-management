@@ -20,7 +20,8 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
 
   const rows = screens.filter(sc => checked.has(sc.id))
   // The soft delete is a full-row PUT, and upstream rejects a row that cannot supply every
-  // required field — as an unattributable 400 or a raw 500, naming no screen. Catch those
+  // required field — or supplies one out of range — as an unattributable 400 or a raw 500,
+  // naming no screen. Catch those
   // rows here instead, while their ids are still in hand. The way out is unticking them: the
   // permanent delete does validate nothing, but it purges the *whole* ticked selection, so it
   // is never the remedy for a few blocked rows.
@@ -73,7 +74,9 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
       return
     }
     // Same contract in both modes: drop the ids from the selection and refetch from page 1.
-    // Under "All" and "Deleted only" the soft-deleted rows legitimately stay in the grid
+    // A soft delete makes the rows drop out of every filter except "Deleted only": "All"
+    // sends no `status` parameter and so inherits upstream's deny-list default, which
+    // excludes deleted rows too. Under "Deleted only" they legitimately stay in the grid
     // after that refetch, now unselected and wearing the Deleted badge — that is correct.
     onDeleted(ids)
   }
@@ -96,9 +99,9 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
           {error && <p style={s.error}>{error}</p>}
           {blocked.length > 0 && (
             <p style={s.blockedNotice}>
-              {`${blocked.length} of the selected screen${blocked.length === 1 ? ' has' : 's have'} no value stored for a field upstream requires on every update, so ${blocked.length === 1 ? 'it' : 'they'} cannot be marked deleted. Untick ${blocked.length === 1 ? 'it' : 'them'} below and confirm the rest. Do not use "Permanently delete instead" to get past this: it purges every screen that is ticked, not just the ${blocked.length === 1 ? 'blocked one' : 'blocked ones'}, and that cannot be undone.\n`}
+              {`${blocked.length} of the selected screen${blocked.length === 1 ? ' holds' : 's hold'} a field value upstream rejects on every update — missing, blank or out of range — so ${blocked.length === 1 ? 'it' : 'they'} cannot be marked deleted. Untick ${blocked.length === 1 ? 'it' : 'them'} below and confirm the rest, or fix the field first in the screen's edit dialog. Do not use "Permanently delete instead" to get past this: it purges every screen that is ticked, not just the ${blocked.length === 1 ? 'blocked one' : 'blocked ones'}, and that cannot be undone.\n`}
               {blocked.map(({ row, missing }) =>
-                `\nscreen ${row.id}${row.player_id ? ` (${row.player_id})` : ''} — missing ${missing.join(', ')}`
+                `\nscreen ${row.id}${row.player_id ? ` (${row.player_id})` : ''} — ${missing.join(', ')}`
               ).join('')}
             </p>
           )}
@@ -135,7 +138,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
                   </td>
                   <td style={s.td}>
                     {sc.id}
-                    {blockedIds.has(sc.id) && <span style={s.blockedMark} title="Missing a field upstream requires; untick this screen to delete the rest">&nbsp;⚠</span>}
+                    {blockedIds.has(sc.id) && <span style={s.blockedMark} title="Holds a field value upstream rejects; untick this screen to delete the rest">&nbsp;⚠</span>}
                   </td>
                   <td style={s.td}>{sc.player_id || '—'}</td>
                   <td style={s.td}><ScreenStatusBadge status={sc.status} /></td>
