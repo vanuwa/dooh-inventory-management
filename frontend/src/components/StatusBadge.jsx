@@ -1,4 +1,4 @@
-import { screenStatusBadge } from '../utils/screenStatus.js'
+import { ACTIVE_BADGE_COLORS, INACTIVE_BADGE_COLORS } from '../constants/statusColors.js'
 
 const badge = {
   display: 'inline-block',
@@ -8,17 +8,10 @@ const badge = {
   fontWeight: 500,
 }
 
-// The binary badge takes its colours from the same palette as the screen-status one, so the
-// green and the grey are defined in a single place; only the labels are the caller's.
+// The binary badge: publishers, placements, publisher users and the appnexus Enabled flag.
+// A screen's three-state `status` has its own badge in `ScreenStatusBadge.jsx`; both take
+// their green and grey from `constants/statusColors.js`, so neither depends on the other.
 export function StatusBadge({ active, labels = ['Active', 'Inactive'] }) {
-  const { background, color } = screenStatusBadge(active ? 'active' : 'inactive')
+  const { background, color } = active ? ACTIVE_BADGE_COLORS : INACTIVE_BADGE_COLORS
   return <span style={{ ...badge, background, color }}>{active ? labels[0] : labels[1]}</span>
-}
-
-// A screen's `status` is a three-state string, not a boolean, so it gets its own badge
-// beside the binary one above (whose six call sites all pass booleans). It lives in this
-// file to reuse the module-level `badge` base style, which is deliberately not exported.
-export function ScreenStatusBadge({ status }) {
-  const { label, background, color } = screenStatusBadge(status)
-  return <span style={{ ...badge, background, color }}>{label}</span>
 }

@@ -9,9 +9,10 @@ import {
   missingRequiredFields,
   partitionSoftDeletable,
   deleteRequest,
-  labelBatchErrors,
+  missingCurrencyPair,
+  outOfRangeFields,
+  DELETED_STATUS,
 } from './screenStatus.js'
-import { formatApiError } from './formatApiError.js'
 
 // Modelled on a real PlacementDoohItem payload: the six nullable plain Go strings arrive
 // as "" when upstream holds NULL, every nullable numeric arrives as null, and lat/lon/width
@@ -303,86 +304,70 @@ describe('deleteRequest', () => {
   })
 })
 
-describe('labelBatchErrors', () => {
-  const rows = [fixtureScreen(), fixtureScreen({ id: 4712, player_id: 'test-player-043' })]
-
-  it('names the screen behind an indexed property', () => {
-    const body = {
-      messages: [{ property_name: 'dooh_settings[1].venue_type_tax', description: "taxonomy 'X' not found" }],
-    }
-    expect(labelBatchErrors(body, rows).messages[0].property_name)
-      .toBe('screen 4712 (test-player-043) — venue_type_tax')
+describe('missingCurrencyPair', () => {
+  it('reports nothing when both halves are set or both are absent', () => {
+    expect(missingCurrencyPair(fixtureScreen({ cpm: 2.5, currency_code: 'EUR' }))).toEqual([])
+    expect(missingCurrencyPair(fixtureScreen({ cpm: null, currency_code: '' }))).toEqual([])
   })
 
-  it('names the screen for an indexed property with no field suffix', () => {
-    const body = { messages: [{ property_name: 'dooh_settings[0]', description: 'not found' }] }
-    expect(labelBatchErrors(body, rows).messages[0].property_name).toBe('screen 4711 (test-player-042)')
+  it('names the absent half in either direction', () => {
+    expect(missingCurrencyPair(fixtureScreen({ cpm: 2.5, currency_code: '' }))).toEqual(['currency_code'])
+    expect(missingCurrencyPair(fixtureScreen({ cpm: null, currency_code: 'EUR' }))).toEqual(['cpm'])
   })
 
-  it('passes a property with no dooh_settings[i] prefix through untouched', () => {
-    const body = { messages: [{ property_name: 'venue_type_tax', description: 'not found' }] }
-    expect(labelBatchErrors(body, rows).messages[0].property_name).toBe('venue_type_tax')
+  it('treats a whitespace-only currency_code as absent', () => {
+    expect(missingCurrencyPair(fixtureScreen({ cpm: 2.5, currency_code: '   ' }))).toEqual(['currency_code'])
+  })
+})
+
+// Exported in its own right because the single-screen edit dialog runs it too: the same four
+// bean-validation bounds fail the same unattributable way on a one-row PUT.
+describe('outOfRangeFields', () => {
+  it('reports nothing for a row inside every bound', () => {
+    expect(outOfRangeFields(fixtureScreen())).toEqual([])
   })
 
-  it('passes the hard-delete ids property through untouched', () => {
-    const body = { messages: [{ property_name: 'ids', description: 'Unknown dooh setting id 7' }] }
-    expect(labelBatchErrors(body, rows).messages[0].property_name).toBe('ids')
+  it('reports a lat or lon outside the WGS84 bounds', () => {
+    expect(outOfRangeFields(fixtureScreen({ lat: 999 }))).toEqual(['lat'])
+    expect(outOfRangeFields(fixtureScreen({ lon: -181 }))).toEqual(['lon'])
   })
 
-  it('degrades to the original property name for an index with no matching row', () => {
-    const body = { messages: [{ property_name: 'dooh_settings[9].cpm', description: 'bad' }] }
-    expect(labelBatchErrors(body, rows).messages[0].property_name).toBe('dooh_settings[9].cpm')
-    expect(labelBatchErrors(body, []).messages[0].property_name).toBe('dooh_settings[9].cpm')
+  it('reports a player_id longer than @Size(max = 255)', () => {
+    expect(outOfRangeFields(fixtureScreen({ player_id: 'x'.repeat(256) }))).toEqual(['player_id'])
+    expect(outOfRangeFields(fixtureScreen({ player_id: 'x'.repeat(255) }))).toEqual([])
   })
 
-  it('keeps the description and the rest of the body', () => {
-    const body = {
-      type: 'ValidationException',
-      messages: [{ property_name: 'dooh_settings[0].cpm', description: 'must be positive', error_code: 'x' }],
-    }
-    const out = labelBatchErrors(body, rows)
-    expect(out.type).toBe('ValidationException')
-    expect(out.messages[0]).toEqual({
-      property_name: 'screen 4711 (test-player-042) — cpm',
-      description: 'must be positive',
-      error_code: 'x',
-    })
+  it('reports a negative cpm and accepts zero, both @DecimalMin("0.0") being inclusive', () => {
+    expect(outOfRangeFields(fixtureScreen({ cpm: -0.01, currency_code: 'EUR' }))).toEqual(['cpm'])
+    expect(outOfRangeFields(fixtureScreen({ cpm: 0, currency_code: 'EUR' }))).toEqual([])
   })
 
-  it('names a screen with no player_id without empty parentheses', () => {
-    const body = { messages: [{ property_name: 'dooh_settings[0].cpm', description: 'bad' }] }
-    expect(labelBatchErrors(body, [fixtureScreen({ player_id: '' })]).messages[0].property_name)
-      .toBe('screen 4711 — cpm')
+  it('accepts the exact bounds — @DecimalMin and @DecimalMax are inclusive', () => {
+    expect(outOfRangeFields(fixtureScreen({ lat: 90, lon: 180 }))).toEqual([])
+    expect(outOfRangeFields(fixtureScreen({ lat: -90, lon: -180 }))).toEqual([])
   })
 
-  it('renders through formatApiError, the only way it is ever used', () => {
-    const body = {
-      messages: [
-        { property_name: 'dooh_settings[1].venue_type_tax', description: "taxonomy 'X' not found" },
-        { property_name: 'dooh_settings[0]', description: 'DOOH setting not found with id 4711' },
-      ],
-    }
-    expect(formatApiError(labelBatchErrors(body, rows), 'Delete failed (400)')).toBe(
-      "screen 4712 (test-player-043) — venue_type_tax: taxonomy 'X' not found\n" +
-      'screen 4711 (test-player-042): DOOH setting not found with id 4711'
-    )
+  it('reads the strings the edit dialog holds, not just coerced numbers', () => {
+    expect(outOfRangeFields({ lat: '999', lon: '0' })).toEqual(['lat'])
+    expect(outOfRangeFields({ lat: '52.37', lon: '4.89' })).toEqual([])
   })
 
-  it('does not mutate the body it is given', () => {
-    const body = { messages: [{ property_name: 'dooh_settings[0].cpm', description: 'bad' }] }
-    labelBatchErrors(body, rows)
-    expect(body.messages[0].property_name).toBe('dooh_settings[0].cpm')
+  it('reports every field it can, so the form can mark them all at once', () => {
+    expect(outOfRangeFields({ lat: 91, lon: 181, player_id: 'x'.repeat(256), cpm: -1 }))
+      .toEqual(['lat', 'lon', 'player_id', 'cpm'])
   })
 
-  it('returns a body with no messages[] unchanged', () => {
-    const body = { message: 'access denied' }
-    expect(labelBatchErrors(body, rows)).toBe(body)
-    expect(labelBatchErrors(null, rows)).toBe(null)
-    expect(labelBatchErrors(undefined, rows)).toBe(undefined)
+  it('ignores an absent or blank value — that is missingRequiredFields\' call', () => {
+    expect(outOfRangeFields({})).toEqual([])
+    expect(outOfRangeFields({ lat: '', lon: null, cpm: '   ' })).toEqual([])
   })
+})
 
-  it('tolerates a message with no property_name', () => {
-    const body = { messages: [{ error_code: 'access.denied' }] }
-    expect(labelBatchErrors(body, rows).messages[0]).toEqual({ error_code: 'access.denied' })
+describe('DELETED_STATUS', () => {
+  it('is the one spelling the filter, the badge and the soft-delete body share', () => {
+    expect(DELETED_STATUS).toBe('deleted')
+    expect(SCREEN_STATUS_OPTIONS.map(o => o.value)).toContain(DELETED_STATUS)
+    expect(screenStatusBadge(DELETED_STATUS).label).toBe('Deleted')
+    expect(softDeleteBody([fixtureScreen()]).dooh_settings[0].status).toBe(DELETED_STATUS)
   })
 })

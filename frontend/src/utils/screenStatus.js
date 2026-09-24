@@ -2,7 +2,25 @@
 // functions: vitest runs in the node environment in this repo, so a rule inside a
 // component cannot be tested at all — a rule in this module can. The request-shaping
 // helpers below live here for the same reason: they are the parts of the delete and the
-// screens fetch whose regressions would otherwise be invisible.
+// screens fetch whose regressions would otherwise be invisible. Rendering an upstream
+// error body is not a status decision and lives in `utils/formatApiError.js`.
+//
+// Visibility rule for the file: every named rule helper is exported and tested directly,
+// so which round a rule landed in is not visible in the export surface.
+import { ACTIVE_BADGE_COLORS, INACTIVE_BADGE_COLORS } from '../constants/statusColors.js'
+
+// Upstream's third status, spelled once: it is a filter option, a badge key, the value the
+// soft delete writes and the option the create dialog removes.
+export const DELETED_STATUS = 'deleted'
+
+// `null`, `undefined`, `''` and whitespace-only all count as blank. Trimmed, because five of
+// the ten required fields — player_id, venue_type_tax, country_code, city, allowed_content —
+// are `@NotBlank` upstream, which rejects `"   "` as well. That rejection arrives through
+// `@Valid`, as a MethodArgumentNotValidException that `ExceptionHandlerController` has no
+// handler for, i.e. a 500 naming no screen — exactly the unattributable failure the
+// pre-checks exist to prevent. `softDeleteBody`'s filter deliberately does NOT use this; see
+// the note at its call site.
+const isBlank = value => value == null || String(value).trim() === ''
 
 // The Screens status filter, in display order.
 //
@@ -18,7 +36,7 @@ export const SCREEN_STATUS_OPTIONS = [
   { value: '', label: 'All' },
   { value: 'active', label: 'Active only' },
   { value: 'inactive', label: 'Inactive only' },
-  { value: 'deleted', label: 'Deleted only' },
+  { value: DELETED_STATUS, label: 'Deleted only' },
 ]
 
 // The filter value the Screens tab lands on. Exported so the default and the option table
@@ -41,13 +59,13 @@ export function screensQuery({ page, limit, search, status }) {
 // genuinely deleted rows change appearance. Rose rather than the delete button's
 // #dc2626, so a grid of deleted rows does not read as a grid of errors.
 //
-// `StatusBadge.jsx` renders both this badge and the older binary one from these colours,
-// so the hexes live here only.
-const INACTIVE_BADGE = { label: 'Inactive', background: '#f3f4f6', color: '#6b7280' }
+// The green and the grey are the app-wide pair from `constants/statusColors.js`, shared with
+// the binary `StatusBadge`; only the rose is a screen-status colour and lives here.
+const INACTIVE_BADGE = { label: 'Inactive', ...INACTIVE_BADGE_COLORS }
 
 const SCREEN_STATUS_BADGES = {
-  active: { label: 'Active', background: '#dcfce7', color: '#15803d' },
-  deleted: { label: 'Deleted', background: '#ffe4e6', color: '#9f1239' },
+  active: { label: 'Active', ...ACTIVE_BADGE_COLORS },
+  [DELETED_STATUS]: { label: 'Deleted', background: '#ffe4e6', color: '#9f1239' },
 }
 
 export function screenStatusBadge(status) {
@@ -77,19 +95,12 @@ export const SOFT_DELETE_REQUIRED_FIELDS = [
   'allowed_content',
 ]
 
-// The required fields a row cannot supply. The test is trimmed, not the plain `null`/`''`
-// softDeleteBody filters by, because five of the ten — player_id, venue_type_tax,
-// country_code, city, allowed_content — are `@NotBlank` upstream, which rejects `"   "` as
-// well. That rejection arrives through `@Valid`, as a MethodArgumentNotValidException that
-// `ExceptionHandlerController` has no handler for, i.e. a 500 naming no screen — exactly the
-// unattributable failure this pre-check exists to prevent. So a whitespace-only value counts
-// as missing here even though softDeleteBody would have kept the key.
+// The required fields a row cannot supply. `isBlank` rather than the plain `null`/`''`
+// softDeleteBody filters by, so a whitespace-only value counts as missing here even though
+// softDeleteBody would have kept the key — see `isBlank`.
 // Numeric 0 counts as supplied: `lat: 0` is a real coordinate, and `String(0).trim()` is '0'.
 export function missingRequiredFields(screen) {
-  return SOFT_DELETE_REQUIRED_FIELDS.filter(field => {
-    const value = screen?.[field]
-    return value == null || String(value).trim() === ''
-  })
+  return SOFT_DELETE_REQUIRED_FIELDS.filter(field => isBlank(screen?.[field]))
 }
 
 // `cpm` and `currency_code` require each other upstream (`validateCurrency`) in *both*
@@ -99,9 +110,9 @@ export function missingRequiredFields(screen) {
 // upstream NULL arrives as null and softDeleteBody drops it) while `currency_code` is a plain
 // string (a stored value is kept). The pair is decidable from data already in hand, so decide
 // it here rather than in a 400. The name reported is the half that is absent.
-function missingCurrencyPair(screen) {
-  const hasCpm = screen?.cpm != null && screen.cpm !== ''
-  const hasCurrency = screen?.currency_code != null && String(screen.currency_code).trim() !== ''
+export function missingCurrencyPair(screen) {
+  const hasCpm = !isBlank(screen?.cpm)
+  const hasCurrency = !isBlank(screen?.currency_code)
   if (hasCpm && !hasCurrency) return ['currency_code']
   if (hasCurrency && !hasCpm) return ['cpm']
   return []
@@ -133,13 +144,13 @@ const MAX_PLAYER_ID_LENGTH = 255
 const LAT_BOUNDS = [-90, 90]
 const LON_BOUNDS = [-180, 180]
 
-function outOfRangeFields(screen) {
+export function outOfRangeFields(screen) {
   const outOfRange = []
   const inBounds = (value, [min, max]) => Number(value) >= min && Number(value) <= max
-  if (screen?.lat != null && screen.lat !== '' && !inBounds(screen.lat, LAT_BOUNDS)) outOfRange.push('lat')
-  if (screen?.lon != null && screen.lon !== '' && !inBounds(screen.lon, LON_BOUNDS)) outOfRange.push('lon')
+  if (!isBlank(screen?.lat) && !inBounds(screen.lat, LAT_BOUNDS)) outOfRange.push('lat')
+  if (!isBlank(screen?.lon) && !inBounds(screen.lon, LON_BOUNDS)) outOfRange.push('lon')
   if (String(screen?.player_id ?? '').length > MAX_PLAYER_ID_LENGTH) outOfRange.push('player_id')
-  if (screen?.cpm != null && screen.cpm !== '' && Number(screen.cpm) < 0) outOfRange.push('cpm')
+  if (!isBlank(screen?.cpm) && Number(screen.cpm) < 0) outOfRange.push('cpm')
   return outOfRange
 }
 
@@ -203,9 +214,11 @@ export const PATH_OWNED_KEYS = ['publisher_id', 'placement_id']
 export function softDeleteBody(screens) {
   const rows = screens.map(screen => {
     const row = Object.fromEntries(
+      // Deliberately NOT `isBlank`: trimming here would turn stored whitespace in a nullable,
+      // non-required column into a NULL write, which is the very loss this filter avoids.
       Object.entries(screen).filter(([k, v]) => !PATH_OWNED_KEYS.includes(k) && v != null && v !== '')
     )
-    row.status = 'deleted'
+    row.status = DELETED_STATUS
     return row
   })
   return { dooh_settings: rows }
@@ -222,36 +235,4 @@ export function deleteRequest({ rows, hardDelete, publisherId, placementId }) {
     return { path: `${path}?ids=${rows.map(row => row.id).join(',')}`, options: { method: 'DELETE' } }
   }
   return { path, options: { method: 'PUT', body: JSON.stringify(softDeleteBody(rows)) } }
-}
-
-// `dooh_settings[7].venue_type_tax` or `dooh_settings[7]`
-const INDEXED_PROPERTY = /^dooh_settings\[(\d+)\](?:\.(.+))?$/
-
-// Upstream keys batch validation errors by the row's index in the array we sent, never by
-// id or player_id — useless to a user deciding which row to uncheck. The index is
-// deterministic (it is the position in the array softDeleteBody built from the same rows),
-// so rewrite it into something nameable before formatApiError renders it:
-//
-//   dooh_settings[7].venue_type_tax  ->  screen 4711 (test-player-042) — venue_type_tax
-//
-// Upstream indexes a one-element batch too for `placement.dooh.id.required`,
-// `placement.dooh.duplicate.id` and `placement.dooh.unknown`, so the single-screen edit
-// save labels its body through here as well. Every other property name passes through
-// untouched, which covers the hard-delete `ids` errors. An index with no matching row
-// degrades to the original property name rather than throwing.
-export function labelBatchErrors(errData, sentScreens) {
-  if (!Array.isArray(errData?.messages)) return errData
-  return {
-    ...errData,
-    messages: errData.messages.map(m => {
-      const match = INDEXED_PROPERTY.exec(m?.property_name ?? '')
-      if (!match) return m
-      const screen = sentScreens[Number(match[1])]
-      if (!screen) return m
-      // player_id is required upstream but a legacy row can still be missing it, and
-      // "screen 4711 ()" reads like a bug rather than like a blank field.
-      const label = screen.player_id ? `screen ${screen.id} (${screen.player_id})` : `screen ${screen.id}`
-      return { ...m, property_name: match[2] ? `${label} — ${match[2]}` : label }
-    }),
-  }
 }

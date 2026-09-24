@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1161,9 +1162,11 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	writeProxyResponse(w, plStatus, plResp, plHeaders)
 }
 
-// doohSettingsMaxBody caps the PUT/POST body this proxy will buffer. It mirrors
+// DoohSettingsMaxBody caps the PUT/POST body this proxy will buffer. It mirrors
 // client_max_body_size in frontend/nginx.conf, which is sized for a 1000-row soft delete.
-const doohSettingsMaxBody = 8 << 20
+// Exported so TestNginxAllowsSoftDeletePut can use it as the floor it holds nginx to,
+// rather than a second copy of the number that could drift from this one.
+const DoohSettingsMaxBody = 8 << 20
 
 func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Request, method, query string) {
 	placementID := url.PathEscape(r.PathValue("placementId"))
@@ -1180,8 +1183,16 @@ func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Req
 		// Bounded at the same 8 MB nginx allows, so `npm run dev` (Vite proxies straight to
 		// :8080 with no nginx in front) and any direct caller share the in-Docker ceiling
 		// instead of being able to buffer an unbounded body here.
-		bodyBytes, err = io.ReadAll(http.MaxBytesReader(w, r.Body, doohSettingsMaxBody))
+		bodyBytes, err = io.ReadAll(http.MaxBytesReader(w, r.Body, DoohSettingsMaxBody))
 		if err != nil {
+			// Over the cap gets the same answer as the nginx hop in front of it, so the two
+			// hops are not distinguishable by status; a truncated or malformed body keeps the
+			// 400 and stays distinguishable from it.
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "failed to read request body", http.StatusBadRequest)
 			return
 		}

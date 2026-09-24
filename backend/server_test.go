@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"dooh-backend/config"
+	"dooh-backend/handlers"
 )
 
 // Improve Digital token response shape (non-standard).
@@ -1044,9 +1045,10 @@ func TestNginxAllowsSoftDeletePut(t *testing.T) {
 	if !ok {
 		t.Fatal("frontend/nginx.conf: client_max_body_size not set; the default 1m rejects a 1000-row soft-delete PUT with 413")
 	}
-	const minBodySize = 2 * 1024 * 1024
-	if size < minBodySize {
-		t.Errorf("client_max_body_size %d is too small for a 1000-row soft-delete PUT; want at least %d", size, minBodySize)
+	// The Go hop caps the same body with http.MaxBytesReader, so nginx must not be the
+	// stricter of the two: read that constant rather than restating the number here.
+	if size < handlers.DoohSettingsMaxBody {
+		t.Errorf("client_max_body_size %d is below the proxy's own cap; want at least %d", size, handlers.DoohSettingsMaxBody)
 	}
 
 	apiLocation := nginxAPILocationPattern.FindSubmatch(conf)
@@ -2985,5 +2987,73 @@ func TestReadOnly_AuthLoginExemptFromReadOnly(t *testing.T) {
 
 	if resp.StatusCode == http.StatusMethodNotAllowed {
 		t.Error("read-only middleware incorrectly blocked POST /api/auth/login")
+	}
+}
+
+// TestProxyDoohSettings_RejectsOversizeBody pins the Go half of the pair
+// TestNginxAllowsSoftDeletePut guards: proxyDoohSettings bounds its io.ReadAll with
+// http.MaxBytesReader, so `npm run dev` (Vite proxies straight to :8080 with no nginx in
+// front) and any direct caller share the in-Docker ceiling instead of buffering an
+// unbounded body. Over it the answer is 413, the same status the nginx hop gives, and not
+// the 400 a truncated or malformed body earns.
+func TestProxyDoohSettings_RejectsOversizeBody(t *testing.T) {
+	reached := false
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			reached = true
+			w.Write([]byte(`{}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	body := bytes.Repeat([]byte("x"), handlers.DoohSettingsMaxBody+1)
+	req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101/dooh-settings", bytes.NewReader(body))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status: want %d, got %d", http.StatusRequestEntityTooLarge, resp.StatusCode)
+	}
+	if reached {
+		t.Error("an over-cap body was forwarded upstream; it must be rejected at the proxy")
+	}
+}
+
+// A body at the cap is forwarded: the limit is the ceiling, not a body size the proxy
+// refuses to carry.
+func TestProxyDoohSettings_ForwardsBodyAtTheCap(t *testing.T) {
+	var got int
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			got = len(b)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	body := bytes.Repeat([]byte("x"), handlers.DoohSettingsMaxBody)
+	req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101/dooh-settings", bytes.NewReader(body))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got != handlers.DoohSettingsMaxBody {
+		t.Errorf("forwarded body: want %d bytes, got %d", handlers.DoohSettingsMaxBody, got)
 	}
 }

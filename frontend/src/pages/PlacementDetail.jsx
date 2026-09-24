@@ -3,7 +3,8 @@ import { useParams, useLocation, useNavigate, Link, useSearchParams } from 'reac
 import { apiFetch } from '../api.js'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
-import { StatusBadge, ScreenStatusBadge } from '../components/StatusBadge.jsx'
+import { StatusBadge } from '../components/StatusBadge.jsx'
+import ScreenStatusBadge from '../components/ScreenStatusBadge.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import EditPlacementModal from '../components/EditPlacementModal.jsx'
 import DeleteScreensModal from '../components/DeleteScreensModal.jsx'
@@ -11,8 +12,8 @@ import PaginationControls from '../components/PaginationControls.jsx'
 import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
-import { formatApiError } from '../utils/formatApiError.js'
-import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, PATH_OWNED_KEYS, screensQuery, labelBatchErrors } from '../utils/screenStatus.js'
+import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
+import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields } from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -61,12 +62,27 @@ const FIELD_HELP = {
 
 const FIELD_OPTIONS = {
   orientation: ['', 'landscape', 'portrait', 'square'],
-  status: ['active', 'inactive', 'deleted'],
+  status: ['active', 'inactive', DELETED_STATUS],
 }
 
 // `deleted` is an edit-only option: a screen cannot sensibly be born deleted, and upstream rejects
 // the next POST of a soft-deleted player_id as a duplicate
-const CREATE_STATUS_OPTIONS = FIELD_OPTIONS.status.filter(opt => opt !== 'deleted')
+const CREATE_STATUS_OPTIONS = FIELD_OPTIONS.status.filter(opt => opt !== DELETED_STATUS)
+
+function optionsFor(field, createMode) {
+  if (field === 'status' && createMode) return CREATE_STATUS_OPTIONS
+  return FIELD_OPTIONS[field]
+}
+
+// Missing required fields and out-of-range ones are both reported as red inputs, but they read
+// differently to a user, so the message names which happened.
+function validationMessage(errors) {
+  const parts = []
+  if (Object.values(errors).some(reason => reason === true)) parts.push('Please fill in all required fields (marked with *).')
+  const outOfRange = Object.keys(errors).filter(field => errors[field] === 'range')
+  if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±90, longitude within ±180, player id at most 255 characters, CPM not negative.`)
+  return parts.join(' ')
+}
 
 function coerceTypes(vals) {
   const intFields = ['publisher_id', 'placement_id', 'resolution_width', 'resolution_height', 'venue_type_id', 'width', 'height', 'min_duration', 'max_duration']
@@ -392,12 +408,18 @@ export default function PlacementDetail() {
   // Trimmed, not a bare `=== ''`: player_id, venue_type_tax, country_code, city and
   // allowed_content are `@NotBlank` upstream, so a whitespace-only value is rejected by
   // `@Valid` — a MethodArgumentNotValidException with no handler upstream, i.e. a bare 500.
+  //
+  // `outOfRangeFields` is the same rule set the bulk soft delete pre-checks, and for the same
+  // reason: lat/lon/player_id/cpm carry bean-validation bounds that fail that identical
+  // unattributable way, so this form decides them from data already in hand rather than
+  // sending a value that comes back as a 500 naming no field.
   function validateFields(values) {
     const errors = {}
     for (const field of REQUIRED_FIELDS) {
       const v = values[field]
       if (v == null || String(v).trim() === '') errors[field] = true
     }
+    for (const field of outOfRangeFields(values)) errors[field] = 'range'
     return errors
   }
 
@@ -406,7 +428,7 @@ export default function PlacementDetail() {
     const errors = validateFields(editValues)
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors)
-      setSaveError('Please fill in all required fields (marked with *).')
+      setSaveError(validationMessage(errors))
       return
     }
     setValidationErrors({})
@@ -439,7 +461,7 @@ export default function PlacementDetail() {
     const errors = validateFields(editValues)
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors)
-      setSaveError('Please fill in all required fields (marked with *).')
+      setSaveError(validationMessage(errors))
       return
     }
     setValidationErrors({})
@@ -792,7 +814,7 @@ export default function PlacementDetail() {
                                       }}
                                       style={validationErrors[field] ? s_editInputError : s.editInput}
                                     >
-                                      {(field === 'status' ? (createMode ? CREATE_STATUS_OPTIONS : FIELD_OPTIONS.status) : FIELD_OPTIONS[field]).map(opt => (
+                                      {optionsFor(field, createMode).map(opt => (
                                         <option key={opt} value={opt}>{opt === '' ? '—' : opt}</option>
                                       ))}
                                     </select>

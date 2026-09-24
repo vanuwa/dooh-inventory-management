@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api.js'
-import { ScreenStatusBadge } from './StatusBadge.jsx'
+import ScreenStatusBadge from './ScreenStatusBadge.jsx'
 import { modalStyles } from './CreateUserModal.jsx'
 import { tableStyles } from '../styles/tables.js'
 import { fmtPublisher } from '../utils/format.js'
-import { formatApiError } from '../utils/formatApiError.js'
-import { deleteRequest, labelBatchErrors, partitionSoftDeletable } from '../utils/screenStatus.js'
+import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
+import { deleteRequest, partitionSoftDeletable } from '../utils/screenStatus.js'
 
 export default function DeleteScreensModal({ screens, publisherId, placementId, publisherName, onClose, onDeleted }) {
   const [checked, setChecked] = useState(() => new Set(screens.map(sc => sc.id)))
@@ -18,15 +18,18 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
   const allChecked = screens.length > 0 && screens.every(sc => checked.has(sc.id))
   const someChecked = screens.some(sc => checked.has(sc.id))
 
-  const rows = screens.filter(sc => checked.has(sc.id))
+  const rows = useMemo(() => screens.filter(sc => checked.has(sc.id)), [screens, checked])
+
   // The soft delete is a full-row PUT, and upstream rejects a row that cannot supply every
   // required field — or supplies one out of range — as an unattributable 400 or a raw 500,
-  // naming no screen. Catch those
-  // rows here instead, while their ids are still in hand. The way out is unticking them: the
-  // permanent delete does validate nothing, but it purges the *whole* ticked selection, so it
-  // is never the remedy for a few blocked rows.
-  const blocked = hardDelete ? [] : partitionSoftDeletable(rows).blocked
-  const blockedIds = new Set(blocked.map(b => b.row.id))
+  // naming no screen. Catch those rows here instead, while their ids are still in hand. The
+  // way out is unticking them: the permanent delete validates nothing, but it purges the
+  // *whole* ticked selection, so it is never the remedy for a few blocked rows.
+  // Memoised because it rescans up to 1000 rows against every rule on each render, and a
+  // render happens on every checkbox toggle.
+  const blocked = useMemo(() => (hardDelete ? [] : partitionSoftDeletable(rows).blocked), [hardDelete, rows])
+  const blockedIds = useMemo(() => new Set(blocked.map(b => b.row.id)), [blocked])
+  const confirmDisabled = rows.length === 0 || blocked.length > 0 || submitting
 
   useEffect(() => {
     if (headerCbRef.current) headerCbRef.current.indeterminate = someChecked && !allChecked
@@ -46,7 +49,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
   }
 
   async function handleConfirm() {
-    if (submitting || rows.length === 0 || blocked.length > 0) return
+    if (confirmDisabled) return
     setSubmitting(true)
     setError('')
     const ids = rows.map(sc => sc.id)
@@ -92,7 +95,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
         <p style={s.warning}>
           {hardDelete
             ? 'This permanently deletes the screens below. This cannot be undone.'
-            : 'This marks the screens below as deleted. They stop serving and drop out of the Active only and All filters — they stay listed under Deleted only — and can be restored by setting the status back to active. It is sent as a full-row update built from the values each screen had when it was ticked, so any edit made to these screens elsewhere since then is overwritten.'}
+            : 'This marks the screens below as deleted. They stop serving and drop out of every filter except Deleted only — and can be restored by setting the status back to active. It is sent as a full-row update built from the values each screen had when it was ticked, so any edit made to these screens elsewhere since then is overwritten.'}
         </p>
 
         <div style={s.modalBody} ref={bodyRef}>
@@ -164,9 +167,9 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
         <div style={s.modalFooter}>
           <button style={s.cancelBtn} onClick={onClose} disabled={submitting}>Cancel</button>
           <button
-            style={checked.size === 0 || blocked.length > 0 || submitting ? s_confirmBtnDisabled : s.confirmBtn}
+            style={confirmDisabled ? s_confirmBtnDisabled : s.confirmBtn}
             onClick={handleConfirm}
-            disabled={checked.size === 0 || blocked.length > 0 || submitting}
+            disabled={confirmDisabled}
           >
             {submitting && <span style={s.spinnerSm} />}
             {submitting ? 'Deleting…' : 'Confirm Deletion'}
@@ -184,7 +187,9 @@ const s = {
   modalBody: { ...modalStyles.modalBody, maxHeight: '60vh' },
   // one upstream message per offending id, so this can run to hundreds of lines: keep it bounded and scrollable
   error: { ...modalStyles.error, fontSize: '0.8125rem', marginTop: 0, marginBottom: '0.75rem', whiteSpace: 'pre-line', maxHeight: '30vh', overflowY: 'auto' },
-  blockedNotice: { margin: '0 0 0.75rem', padding: '0.5rem 0.75rem', borderRadius: 4, background: '#fff7ed', border: '1px solid #fb923c', color: '#7c2d12', fontSize: '0.8125rem', whiteSpace: 'pre-line', maxHeight: '30vh', overflowY: 'auto' },
+  // Amber, deliberately not the #fff7ed/#fb923c/#7c2d12 of Layout's non-production accent
+  // strip: that trio means "you are on acceptance" and must keep meaning only that.
+  blockedNotice: { margin: '0 0 0.75rem', padding: '0.5rem 0.75rem', borderRadius: 4, background: '#fffbeb', border: '1px solid #fcd34d', color: '#92400e', fontSize: '0.8125rem', whiteSpace: 'pre-line', maxHeight: '30vh', overflowY: 'auto' },
   blockedMark: { color: '#b45309' },
   warning: { margin: '0 0 1rem', fontSize: '0.875rem', color: '#374151', flexShrink: 0 },
   hardDeleteRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.75rem 0 0', fontSize: '0.875rem', color: '#374151', cursor: 'pointer', flexShrink: 0 },
