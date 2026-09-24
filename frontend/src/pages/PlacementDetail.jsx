@@ -3,7 +3,7 @@ import { useParams, useLocation, useNavigate, Link, useSearchParams } from 'reac
 import { apiFetch } from '../api.js'
 import { useRecentActivity } from '../hooks/useRecentActivity.js'
 import Layout from '../components/Layout.jsx'
-import { StatusBadge } from '../components/StatusBadge.jsx'
+import { StatusBadge, ScreenStatusBadge } from '../components/StatusBadge.jsx'
 import ReportingTab from '../components/ReportingTab.jsx'
 import EditPlacementModal from '../components/EditPlacementModal.jsx'
 import DeleteScreensModal from '../components/DeleteScreensModal.jsx'
@@ -687,7 +687,7 @@ export default function PlacementDetail() {
                             )}
                             <td style={s.td}><span style={s.idTag}>{sc.id}</span></td>
                             <td style={s.td}>{fmt(sc.player_id)}</td>
-                            <td style={s.td}><StatusBadge active={sc.status === 'active'} /></td>
+                            <td style={s.td}><ScreenStatusBadge status={sc.status} /></td>
                             <td style={s.td}>{fmt(sc.device_id)}</td>
                             <td style={s.td}>{fmt(sc.orientation)}</td>
                             <td style={s.td}>{resolution}</td>

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { apiFetch } from '../api.js'
-import { StatusBadge } from './StatusBadge.jsx'
+import { ScreenStatusBadge } from './StatusBadge.jsx'
 import { modalStyles } from './CreateUserModal.jsx'
 import { tableStyles } from '../styles/tables.js'
 import { fmtPublisher } from '../utils/format.js'
@@ -106,7 +106,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
                   </td>
                   <td style={s.td}>{sc.id}</td>
                   <td style={s.td}>{sc.player_id || '—'}</td>
-                  <td style={s.td}><StatusBadge active={sc.status === 'active'} /></td>
+                  <td style={s.td}><ScreenStatusBadge status={sc.status} /></td>
                   <td style={s.td}>{sc.placement_id || '—'}</td>
                   <td style={s.td}>{fmtPublisher(sc.publisher_id, publisherName)}</td>
                   <td style={s.td}>{sc.country_code || '—'}</td>
