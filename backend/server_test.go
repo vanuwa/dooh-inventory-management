@@ -612,30 +612,55 @@ func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
 	}
 }
 
+// TestPlacementDoohSettings_StatusPassthrough covers every token the Screens status filter
+// can send, plus the case that matters most: the "All" option sends no status at all, and the
+// proxy must forward none either, so the list inherits upstream's own default (which excludes
+// soft-deleted rows). An empty status=  would be a 400 upstream, not the default.
 func TestPlacementDoohSettings_StatusPassthrough(t *testing.T) {
-	upstream := mockUpstream(t, map[string]http.HandlerFunc{
-		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
-			if got := r.URL.Query().Get("status"); got != "inactive" {
-				t.Errorf("status: want %q, got %q", "inactive", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(mockDoohSettingsBody))
-		},
-	})
-
-	app := appServer(t, upstream.URL)
-
-	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings?status=inactive", nil)
-	req.Header.Set("X-Access-Token", "mock-access-token")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name  string
+		query string
+		want  string // "" means: the status parameter must be absent upstream
+	}{
+		{"active", "?status=active", "active"},
+		{"inactive", "?status=inactive", "inactive"},
+		{"deleted", "?status=deleted", "deleted"},
+		{"absent", "", ""},
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+					values, ok := r.URL.Query()["status"]
+					switch {
+					case tc.want == "" && ok:
+						t.Errorf("status: want no parameter, got %q", values)
+					case tc.want != "" && !ok:
+						t.Errorf("status: want %q, got no parameter", tc.want)
+					case tc.want != "" && values[0] != tc.want:
+						t.Errorf("status: want %q, got %q", tc.want, values[0])
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(mockDoohSettingsBody))
+				},
+			})
+
+			app := appServer(t, upstream.URL)
+
+			req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings"+tc.query, nil)
+			req.Header.Set("X-Access-Token", "mock-access-token")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status: want 200, got %d", resp.StatusCode)
+			}
+		})
 	}
 }
 
