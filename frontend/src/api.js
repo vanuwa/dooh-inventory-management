@@ -65,7 +65,10 @@ export async function apiFetch(path, options = {}, _retried = false) {
       const ok = await refreshTokens()
       if (ok) return apiFetch(path, options, true)
     }
-    if (onUnauthorized) onUnauthorized()
+    // The handler is told which environment failed: it clears that environment's
+    // tokens, and the app's mirror of the selection can lag a cross-tab switch by a
+    // turn of the event loop, so it must not guess from its own state.
+    if (onUnauthorized) onUnauthorized(env)
     throw new Error('Unauthorized')
   }
 

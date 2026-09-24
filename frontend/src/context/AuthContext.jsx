@@ -4,6 +4,7 @@ import {
   ACCESS_TOKEN_KEY,
   API_ENV_KEY,
   REFRESH_TOKEN_KEY,
+  isKnownApiEnv,
   readApiEnv,
   readScoped,
   removeScoped,
@@ -27,11 +28,16 @@ export function AuthProvider({ children }) {
   const [apiEnv, setApiEnv] = useState(readApiEnv)
   const [tokens, setTokens] = useState(() => readTokens(readApiEnv()))
 
-  const logout = useCallback(() => {
-    removeScoped(ACCESS_TOKEN_KEY, apiEnv)
-    removeScoped(REFRESH_TOKEN_KEY, apiEnv)
+  // Clears the tokens of the environment the caller names — api.js passes the one its
+  // failing request actually used — and falls back to the live stored selection, never
+  // to the apiEnv mirror: another tab's switch redirects requests before this tab's
+  // state catches up, and clearing the wrong slot would end the other session silently.
+  const logout = useCallback(env => {
+    const target = isKnownApiEnv(env) ? env : readApiEnv()
+    removeScoped(ACCESS_TOKEN_KEY, target)
+    removeScoped(REFRESH_TOKEN_KEY, target)
     setTokens({ accessToken: null, refreshToken: null })
-  }, [apiEnv])
+  }, [])
 
   const login = useCallback((accessToken, refreshToken) => {
     writeScoped(ACCESS_TOKEN_KEY, apiEnv, accessToken)
@@ -59,12 +65,18 @@ export function AuthProvider({ children }) {
   }, [selectApiEnv])
 
   // localStorage is shared by every tab, so another tab's switch silently redirects
-  // this tab's requests too. Force the same reload rather than leave production chrome
-  // over an acceptance session.
+  // this tab's requests too. Mirror the new selection before reloading — the reload is
+  // not instant, and until it lands the header would otherwise keep naming the
+  // environment the requests have already left — then reload for the same reason a
+  // local switch does: cached page state carries IDs from the old instance.
   useEffect(() => {
     function onStorage(e) {
       if (e.key !== API_ENV_KEY) return
-      if (readApiEnv() !== apiEnv) window.location.assign('/recent')
+      const applied = readApiEnv()
+      if (applied === apiEnv) return
+      setApiEnv(applied)
+      setTokens(readTokens(applied))
+      window.location.assign('/recent')
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)

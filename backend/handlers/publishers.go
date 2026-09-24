@@ -254,15 +254,7 @@ func (h *PublishersHandler) Publisher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if status != http.StatusOK {
-		w.WriteHeader(status)
-		return
-	}
-
-	if ct := headers.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.Write(body)
+	writeProxyResponse(w, status, body, headers)
 }
 
 func (h *PublishersHandler) PublisherPlacements(w http.ResponseWriter, r *http.Request) {

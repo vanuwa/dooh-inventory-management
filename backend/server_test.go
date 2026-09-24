@@ -1276,6 +1276,10 @@ func TestApiEnv_ResponsesVaryOnApiEnvHeader(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(mockPublisherListBody))
 		},
+		"/admin/v1/publishers/42": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockPublisherItemBody))
+		},
 		"/common/v1/user-details": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(mockUserBody))
@@ -1284,7 +1288,7 @@ func TestApiEnv_ResponsesVaryOnApiEnvHeader(t *testing.T) {
 
 	app := appServer(t, upstream.URL)
 
-	for _, path := range []string{"/api/publishers", "/api/user/details"} {
+	for _, path := range []string{"/api/publishers", "/api/publishers/42", "/api/user/details"} {
 		req, _ := http.NewRequest(http.MethodGet, app.URL+path, nil)
 		req.Header.Set("X-Access-Token", "mock-access-token")
 
