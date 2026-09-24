@@ -21,12 +21,6 @@ type Config struct {
 	Environments   map[string]Environment
 	FrontendOrigin string
 	Port           string
-
-	// Deprecated: populated from the production entry so handlers still compile
-	// while the call sites migrate.
-	ImproveAPIBaseURL   string
-	ImproveClientID     string
-	ImproveClientSecret string
 }
 
 func Load() *Config {
@@ -55,10 +49,6 @@ func Load() *Config {
 		},
 		FrontendOrigin: getEnv("FRONTEND_ORIGIN", "http://localhost:5173"),
 		Port:           getEnv("PORT", "8080"),
-
-		ImproveAPIBaseURL:   production.BaseURL,
-		ImproveClientID:     production.ClientID,
-		ImproveClientSecret: production.ClientSecret,
 	}
 }
 

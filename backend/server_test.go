@@ -49,11 +49,8 @@ func appServer(t *testing.T, upstreamURL string) *httptest.Server {
 				ClientSecret: "test-client-secret",
 			},
 		},
-		ImproveAPIBaseURL:   upstreamURL,
-		ImproveClientID:     "test-client-id",
-		ImproveClientSecret: "test-client-secret",
-		FrontendOrigin:      "http://localhost:3000",
-		Port:                "0",
+		FrontendOrigin: "http://localhost:3000",
+		Port:           "0",
 	}
 	s := httptest.NewServer(newHandler(cfg))
 	t.Cleanup(s.Close)
@@ -79,11 +76,8 @@ func appServerEnvs(t *testing.T, prodURL, acceptanceURL string) *httptest.Server
 				ClientSecret: "test-client-secret",
 			},
 		},
-		ImproveAPIBaseURL:   prodURL,
-		ImproveClientID:     "test-client-id",
-		ImproveClientSecret: "test-client-secret",
-		FrontendOrigin:      "http://localhost:3000",
-		Port:                "0",
+		FrontendOrigin: "http://localhost:3000",
+		Port:           "0",
 	}
 	s := httptest.NewServer(newHandler(cfg))
 	t.Cleanup(s.Close)
@@ -1333,6 +1327,150 @@ func TestApiEnv_WriteRouteHonoursAcceptance(t *testing.T) {
 	got, _ := io.ReadAll(resp.Body)
 	if string(got) != respBody {
 		t.Errorf("body: want %s, got %s", respBody, got)
+	}
+}
+
+// TestApiEnv_LoginMintsTokenOnSelectedEnvironment pins that a token is always minted by
+// the instance it will be spent on: the shared OAuth client is posted to the acceptance
+// host, never to production.
+func TestApiEnv_LoginMintsTokenOnSelectedEnvironment(t *testing.T) {
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("production upstream must not mint a token for X-Api-Env: acceptance")
+			w.Write([]byte(mockTokenBody))
+		},
+	})
+	acceptanceCalled := false
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, r *http.Request) {
+			acceptanceCalled = true
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.FormValue("grant_type"); got != "password" {
+				t.Errorf("grant_type: want %q, got %q", "password", got)
+			}
+			if got := r.FormValue("client_id"); got != "test-client-id" {
+				t.Errorf("client_id: want %q, got %q", "test-client-id", got)
+			}
+			if got := r.FormValue("client_secret"); got != "test-client-secret" {
+				t.Errorf("client_secret: want %q, got %q", "test-client-secret", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockTokenBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/auth/login",
+		strings.NewReader(`{"username":"user","password":"pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Api-Env", "acceptance")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !acceptanceCalled {
+		t.Error("upstream: want the acceptance mock to mint the token, it was not called")
+	}
+}
+
+func TestApiEnv_LoginWithoutHeaderMintsTokenOnProduction(t *testing.T) {
+	productionCalled := false
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			productionCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockTokenBody))
+		},
+	})
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("acceptance upstream must not mint a token without X-Api-Env")
+			w.Write([]byte(mockTokenBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	resp, err := http.Post(app.URL+"/api/auth/login", "application/json",
+		strings.NewReader(`{"username":"user","password":"pass"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !productionCalled {
+		t.Error("upstream: want the production mock to mint the token, it was not called")
+	}
+}
+
+// TestApiEnv_RefreshUsesSelectedEnvironment is the backend half of the silent-refresh
+// path: an acceptance refresh token must be redeemed on acceptance, not on production.
+func TestApiEnv_RefreshUsesSelectedEnvironment(t *testing.T) {
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("production upstream must not refresh a token for X-Api-Env: acceptance")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+	acceptanceCalled := false
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/oauth/token": func(w http.ResponseWriter, r *http.Request) {
+			acceptanceCalled = true
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.FormValue("grant_type"); got != "refresh_token" {
+				t.Errorf("grant_type: want %q, got %q", "refresh_token", got)
+			}
+			if got := r.FormValue("refresh_token"); got != "old-refresh-token" {
+				t.Errorf("refresh_token: want %q, got %q", "old-refresh-token", got)
+			}
+			if got := r.FormValue("client_id"); got != "test-client-id" {
+				t.Errorf("client_id: want %q, got %q", "test-client-id", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockNewTokenBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/auth/refresh",
+		strings.NewReader(`{"refresh_token":"old-refresh-token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Api-Env", "acceptance")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !acceptanceCalled {
+		t.Error("upstream: want the acceptance mock to refresh the token, it was not called")
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["access_token"] != "new-access-token" {
+		t.Errorf("access_token: want %q, got %q", "new-access-token", body["access_token"])
 	}
 }
 

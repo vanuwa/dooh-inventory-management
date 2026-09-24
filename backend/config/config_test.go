@@ -91,22 +91,3 @@ func TestLoadExplicitEnvVars(t *testing.T) {
 		t.Errorf("acceptance: want %+v, got %+v", want, acc)
 	}
 }
-
-func TestLoadLegacyFieldsMirrorProduction(t *testing.T) {
-	t.Setenv("IMPROVE_API_BASE_URL", "https://prod.example")
-	t.Setenv("IMPROVE_ACCEPTANCE_API_BASE_URL", "https://acc.example")
-	t.Setenv("IMPROVE_CLIENT_ID", "cid")
-	t.Setenv("IMPROVE_CLIENT_SECRET", "csecret")
-
-	cfg := Load()
-
-	if cfg.ImproveAPIBaseURL != "https://prod.example" {
-		t.Errorf("ImproveAPIBaseURL: want %q, got %q", "https://prod.example", cfg.ImproveAPIBaseURL)
-	}
-	if cfg.ImproveClientID != "cid" {
-		t.Errorf("ImproveClientID: want %q, got %q", "cid", cfg.ImproveClientID)
-	}
-	if cfg.ImproveClientSecret != "csecret" {
-		t.Errorf("ImproveClientSecret: want %q, got %q", "csecret", cfg.ImproveClientSecret)
-	}
-}

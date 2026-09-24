@@ -83,7 +83,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	params.Set("username", req.Username)
 	params.Set("password", req.Password)
 
-	tokens, err := fetchToken(h.cfg.ImproveAPIBaseURL, h.cfg.ImproveClientID, h.cfg.ImproveClientSecret, params)
+	env := upstreamEnv(h.cfg, r)
+	tokens, err := fetchToken(env.BaseURL, env.ClientID, env.ClientSecret, params)
 	if err != nil {
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
@@ -106,7 +107,8 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	params.Set("grant_type", "refresh_token")
 	params.Set("refresh_token", req.RefreshToken)
 
-	tokens, err := fetchToken(h.cfg.ImproveAPIBaseURL, h.cfg.ImproveClientID, h.cfg.ImproveClientSecret, params)
+	env := upstreamEnv(h.cfg, r)
+	tokens, err := fetchToken(env.BaseURL, env.ClientID, env.ClientSecret, params)
 	if err != nil {
 		http.Error(w, "token refresh failed", http.StatusUnauthorized)
 		return
