@@ -3,6 +3,11 @@
 ## 2026-09-24
 
 ### Features
+- Deleting screens from the placement Screens tab is now a **soft delete**: confirming marks the selected screens as `deleted` instead of removing them, so they stop serving and drop out of the default view but can be brought back at any time by setting their status back to Active
+- The confirmation dialog gained a **Permanently delete instead (cannot be undone)** checkbox that restores the previous irreversible purge; it is unchecked by default and stays the admin-only path, while the soft delete works with any account that can edit screens
+- The Screens status filter gained a **Deleted only** option, and deleted screens show a distinct rose **Deleted** badge in the grid and in the delete dialog instead of being labelled Inactive. **All** is unchanged and still lists active and inactive screens only — deleted ones are reached through the new option
+- The screen edit modal can now set the status to **deleted** (and back to **active**) for a single screen without going through Select mode; the create form still offers only Active and Inactive
+- When a soft delete is rejected because one of the selected screens no longer passes upstream validation, the error names the offending **screen id and player id** instead of the position in the request array, so the row can be unticked and the rest retried
 - The portal can now talk to either SSP instance without a rebuild: an environment switcher in the header (and on the login page) selects **Production** (`api.360yield.com`) or **Acceptance** (`api.360yielddev.com`), and every `/api/...` call carries the choice as an `X-Api-Env` header that the Go proxy resolves per request
 - Both the upstream base URL and the OAuth client used to mint the token follow the selection, so an access token is always issued by the instance it is spent on; the same `IMPROVE_CLIENT_ID` / `IMPROVE_CLIENT_SECRET` is valid on both, so switching needs no extra secrets
 - Tokens and recent-activity history are namespaced per environment in localStorage, so you stay logged into production and acceptance at the same time and switching does not log either session out; existing unscoped keys are migrated to production on first load, so nobody is logged out by the upgrade

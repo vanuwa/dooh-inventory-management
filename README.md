@@ -28,7 +28,7 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
   - **Users** — list publisher users; create or edit a user (Console/API access types, role presets) via modal
   - **Reporting** — generate and download a CSV performance report for the publisher
 - Placement detail page with two tabs (URL-reflected):
-  - **Screens** — server-side paginated grid; click any row to open a view/edit modal with full screen details; download all screens as CSV; a **Select** mode turns on a checkbox column so screens can be picked across pages/searches (up to 1000 per delete — the selection stops there and says so) and deleted in bulk via a confirmation dialog (admin-only — see Prerequisites)
+  - **Screens** — server-side paginated grid with a status filter (All, Active only, Inactive only, Deleted only); click any row to open a view/edit modal with full screen details; download all screens as CSV; a **Select** mode turns on a checkbox column so screens can be picked across pages/searches (up to 1000 per delete — the selection stops there and says so) and deleted in bulk via a confirmation dialog. Deleting is a **soft delete** by default: the screens are marked `deleted`, stop serving, drop out of the default view and can be restored by setting their status back to Active from the edit modal. A **Permanently delete instead** checkbox in the dialog switches to the old irreversible purge (admin-only — see Prerequisites). Note that **All** shows active and inactive screens but not deleted ones; deleted screens are listed under **Deleted only**
   - **Reporting** — generate and download a CSV performance report for the placement
 - Automatic token refresh — handled client-side via response headers, sessions stay alive without re-login
 - Switch between the production and acceptance SSP instances from the header (or on the login page) without a rebuild — each environment keeps its own session, so both stay logged in (see [API environments](#api-environments))
@@ -52,10 +52,11 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
 
 - Docker and Docker Compose
 - SSP API credentials (`client_id` and `client_secret`)
-- For **bulk screen deletion only**: the logged-in SSP user needs the `ADMINISTRATOR` module, and
-  the role they authenticate with needs a `DELETE` grant on the DOOH settings resource in the
-  360yield gateway. Without either, the confirmation dialog shows a `403` from upstream or the
-  gateway — that is a permissions issue, not a bug. Everything else works with a normal account.
+- For **permanent screen deletion only** (the opt-in checkbox in the delete dialog): the logged-in SSP
+  user needs the `ADMINISTRATOR` module, and the role they authenticate with needs a `DELETE` grant on
+  the DOOH settings resource in the 360yield gateway. Without either, the confirmation dialog shows a
+  `403` from upstream or the gateway — that is a permissions issue, not a bug. The default soft delete
+  needs no admin rights, and everything else works with a normal account.
 
 ### 1. Create a `.env` file
 
@@ -226,8 +227,9 @@ make rebuild-ui    # rebuild only the frontend container
 | `GET` | `/api/publishers/{id}` | Single publisher detail |
 | `GET` | `/api/publishers/{id}/placements` | Paginated placements for a publisher (sorted `-id`) |
 | `POST` | `/api/publishers/{id}/placements` | Create a DOOH placement (orchestrates inventory + zone + placement upstream) |
-| `GET` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Paginated screens for a placement (`page`, `limit`, `search`, `sort`) |
-| `DELETE` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Bulk delete screens (`ids=1,2,3`, validated as a numeric CSV of at most 1000 ids before forwarding; admin-only upstream, all-or-nothing) |
+| `GET` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Paginated screens for a placement (`page`, `limit`, `search`, `sort`, `status`) |
+| `PUT` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Edit screens; also the soft delete, which sends the selected rows back with `status: "deleted"` (up to 1000 rows, all-or-nothing) |
+| `DELETE` | `/api/publishers/{publisherId}/placements/{placementId}/dooh-settings` | Permanently delete screens (`ids=1,2,3`, validated as a numeric CSV of at most 1000 ids before forwarding; admin-only upstream, all-or-nothing) |
 | `POST` | `/api/report/placement/{publisherId}/{placementId}` | Synchronous report preview (up to 500 rows) |
 | `POST` | `/api/report/generate/placement/{publisherId}/{placementId}` | Start async CSV report generation |
 | `GET` | `/api/report/status/{reportGenerationId}` | Poll generation status until `FINISHED_OK` |

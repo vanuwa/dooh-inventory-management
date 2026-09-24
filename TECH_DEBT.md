@@ -4,6 +4,15 @@ Known shortcuts and inefficiencies that are acceptable for now but should be rev
 
 ## Frontend
 
+- **The "All" screen filter does not include deleted screens** (`frontend/src/utils/screenStatus.js`). The option keeps its empty value and therefore sends no `status` parameter, inheriting upstream's own default — the deny-list `status_id IS NULL OR status_id <> 3` — so it means "everything except deleted" while still being labelled "All". Accepted on 2026-09-24 because sending an explicit `active,inactive,deleted` allow-list instead would have hidden rows carrying a `NULL` or unmapped `status_id` with no option able to ask for them back, and because the deleted rows have their own entry directly beneath it.
+  - Fix (if it ever confuses anyone): relabel the option "All except deleted", or add a fifth option that sends the explicit allow-list once a production `status_id` survey shows nothing else is in use.
+
+- **One invalid legacy row fails the whole soft-delete batch** (`frontend/src/components/DeleteScreensModal.jsx`). The soft delete is a single all-or-nothing `PUT`, and upstream re-validates every field of every row where the hard `DELETE` validated none. A screen that no longer passes current validation — an unresolvable `venue_type_tax`, an invalid `venue_type_id`, a pre-SSP-1106 row with `cpm` set and no `currency_code`, a non-URL `screen_img_url` — takes the rest of the selection down with it. `labelBatchErrors` names the offending screen so it can be unticked and the rest retried, and ticking hard delete bypasses validation entirely, so the workaround is cheap.
+  - Fix: fall back to per-row requests (or chunked batches) when a batch fails, at the cost of losing the all-or-nothing guarantee.
+
+- **A soft delete recomputes the screen's `orientation`** (`frontend/src/utils/screenStatus.js`). `orientation` is `READ_ONLY` on the upstream DTO and `applyScreenFields` recomputes it from the stored resolution on every `PUT`, so a legacy row whose stored orientation disagrees with its resolution is normalised as a side effect of being deleted. Harmless — the value is corrected, not corrupted — but it means the operation is not literally "change one column", and the row's history diff shows the extra field.
+  - Fix: none available from this repository; it would take an upstream endpoint that patches `status` alone.
+
 - **Copy VAST Tag is production-only** (`frontend/src/pages/PlacementDetail.jsx`). The ad host `https://ad.360yield.com` is hardcoded and does not follow the API environment switcher, so on acceptance the copied tag points at the production ad server while carrying acceptance publisher/placement IDs. The ad server is a different host from the API, which is why it was left out when the switcher landed (2026-09-24).
   - Fix: add an `adHost` field to each row of `API_ENVIRONMENTS` (`frontend/src/constants/apiEnvironments.js`) and build the URL from it.
 
