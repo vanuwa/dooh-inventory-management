@@ -1,3 +1,5 @@
+import { readApiEnv, scopedKey } from './utils/apiEnvironment.js'
+
 let onUnauthorized = null
 let pendingRefresh = null
 
@@ -7,20 +9,25 @@ export function setUnauthorizedHandler(handler) {
 
 async function refreshTokens() {
   if (pendingRefresh) return pendingRefresh
-  const refreshToken = localStorage.getItem('refresh_token')
+  // Resolved per call, never captured: a switch reloads the page, but a stale
+  // value here would spend one environment's refresh token on the other.
+  const env = readApiEnv()
+  const refreshToken = localStorage.getItem(scopedKey('refresh_token', env))
   if (!refreshToken) return false
 
   const doRefresh = async () => {
     try {
       const res = await fetch('/api/auth/refresh', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Api-Env': env },
         body: JSON.stringify({ refresh_token: refreshToken }),
       })
       if (!res.ok) return false
       const data = await res.json()
-      localStorage.setItem('access_token', data.access_token)
-      if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token)
+      localStorage.setItem(scopedKey('access_token', env), data.access_token)
+      if (data.refresh_token) {
+        localStorage.setItem(scopedKey('refresh_token', env), data.refresh_token)
+      }
       return true
     } catch {
       return false
@@ -34,7 +41,8 @@ async function refreshTokens() {
 }
 
 export async function apiFetch(path, options = {}, _retried = false) {
-  const accessToken = localStorage.getItem('access_token')
+  const env = readApiEnv()
+  const accessToken = localStorage.getItem(scopedKey('access_token', env))
 
   const headers = {}
   if (!(options.body instanceof FormData)) {
@@ -42,6 +50,7 @@ export async function apiFetch(path, options = {}, _retried = false) {
   }
   Object.assign(headers, options.headers)
   if (accessToken) headers['X-Access-Token'] = accessToken
+  headers['X-Api-Env'] = env
 
   const response = await fetch('/api' + path, { ...options, headers })
 
