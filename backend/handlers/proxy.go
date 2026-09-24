@@ -13,15 +13,11 @@ import (
 // An absent header means production.
 const EnvHeader = "X-Api-Env"
 
-// upstreamEnv resolves the upstream instance for this request. apiEnvMiddleware
-// rejects unknown names before routing, so the fallback here only matters for a
-// handler exercised outside the middleware chain — it degrades to production
-// rather than to a zero value with an empty base URL.
+// upstreamEnv resolves the upstream instance for this request. An absent header
+// selects production; apiEnvMiddleware rejects unknown names before routing, so
+// the not-ok case cannot be reached with a configured Config.
 func upstreamEnv(cfg *config.Config, r *http.Request) config.Environment {
-	if env, ok := cfg.Env(r.Header.Get(EnvHeader)); ok {
-		return env
-	}
-	env, _ := cfg.Env("")
+	env, _ := cfg.Env(r.Header.Get(EnvHeader))
 	return env
 }
 
@@ -63,6 +59,9 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func writeProxyResponse(w http.ResponseWriter, status int, body []byte, headers http.Header) {
+	// The same URL returns different data per environment, so no cache may reuse a
+	// response across a switch.
+	w.Header().Set("Vary", EnvHeader)
 	if ct := headers.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

@@ -37,43 +37,30 @@ func mockUpstream(t *testing.T, routes map[string]http.HandlerFunc) *httptest.Se
 	return s
 }
 
-// appServer builds the full application handler pointed at the given upstream URL.
+// appServer builds the full application handler with both environments pointed at the
+// same upstream, for tests that do not care which one a request selected.
 func appServer(t *testing.T, upstreamURL string) *httptest.Server {
 	t.Helper()
-	cfg := &config.Config{
-		Environments: map[string]config.Environment{
-			config.EnvProduction: {
-				Name:         config.EnvProduction,
-				BaseURL:      upstreamURL,
-				ClientID:     "test-client-id",
-				ClientSecret: "test-client-secret",
-			},
-		},
-		FrontendOrigin: "http://localhost:3000",
-		Port:           "0",
-	}
-	s := httptest.NewServer(newHandler(cfg))
-	t.Cleanup(s.Close)
-	return s
+	return appServerEnvs(t, upstreamURL, upstreamURL)
 }
 
 // appServerEnvs builds the application handler with two upstream instances configured, so
-// a test can assert which one a request actually reached.
+// a test can assert which one a request actually reached. The acceptance OAuth client is
+// deliberately different from the production one: the environments share a client today,
+// so only distinct fixtures can prove the credentials follow the selected environment.
 func appServerEnvs(t *testing.T, prodURL, acceptanceURL string) *httptest.Server {
 	t.Helper()
 	cfg := &config.Config{
 		Environments: map[string]config.Environment{
 			config.EnvProduction: {
-				Name:         config.EnvProduction,
 				BaseURL:      prodURL,
 				ClientID:     "test-client-id",
 				ClientSecret: "test-client-secret",
 			},
 			config.EnvAcceptance: {
-				Name:         config.EnvAcceptance,
 				BaseURL:      acceptanceURL,
-				ClientID:     "test-client-id",
-				ClientSecret: "test-client-secret",
+				ClientID:     "acc-client-id",
+				ClientSecret: "acc-client-secret",
 			},
 		},
 		FrontendOrigin: "http://localhost:3000",
@@ -1344,17 +1331,20 @@ func TestApiEnv_LoginMintsTokenOnSelectedEnvironment(t *testing.T) {
 	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
 		"/oauth/token": func(w http.ResponseWriter, r *http.Request) {
 			acceptanceCalled = true
+			// t.Errorf, not t.Fatalf: this runs on the server goroutine, where a
+			// Fatal aborts the response instead of the test.
 			if err := r.ParseForm(); err != nil {
-				t.Fatalf("parse form: %v", err)
+				t.Errorf("parse form: %v", err)
+				return
 			}
 			if got := r.FormValue("grant_type"); got != "password" {
 				t.Errorf("grant_type: want %q, got %q", "password", got)
 			}
-			if got := r.FormValue("client_id"); got != "test-client-id" {
-				t.Errorf("client_id: want %q, got %q", "test-client-id", got)
+			if got := r.FormValue("client_id"); got != "acc-client-id" {
+				t.Errorf("client_id: want %q, got %q", "acc-client-id", got)
 			}
-			if got := r.FormValue("client_secret"); got != "test-client-secret" {
-				t.Errorf("client_secret: want %q, got %q", "test-client-secret", got)
+			if got := r.FormValue("client_secret"); got != "acc-client-secret" {
+				t.Errorf("client_secret: want %q, got %q", "acc-client-secret", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(mockTokenBody))
@@ -1428,8 +1418,11 @@ func TestApiEnv_RefreshUsesSelectedEnvironment(t *testing.T) {
 	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
 		"/oauth/token": func(w http.ResponseWriter, r *http.Request) {
 			acceptanceCalled = true
+			// t.Errorf, not t.Fatalf: this runs on the server goroutine, where a
+			// Fatal aborts the response instead of the test.
 			if err := r.ParseForm(); err != nil {
-				t.Fatalf("parse form: %v", err)
+				t.Errorf("parse form: %v", err)
+				return
 			}
 			if got := r.FormValue("grant_type"); got != "refresh_token" {
 				t.Errorf("grant_type: want %q, got %q", "refresh_token", got)
@@ -1437,8 +1430,8 @@ func TestApiEnv_RefreshUsesSelectedEnvironment(t *testing.T) {
 			if got := r.FormValue("refresh_token"); got != "old-refresh-token" {
 				t.Errorf("refresh_token: want %q, got %q", "old-refresh-token", got)
 			}
-			if got := r.FormValue("client_id"); got != "test-client-id" {
-				t.Errorf("client_id: want %q, got %q", "test-client-id", got)
+			if got := r.FormValue("client_id"); got != "acc-client-id" {
+				t.Errorf("client_id: want %q, got %q", "acc-client-id", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(mockNewTokenBody))
@@ -1471,6 +1464,135 @@ func TestApiEnv_RefreshUsesSelectedEnvironment(t *testing.T) {
 	}
 	if body["access_token"] != "new-access-token" {
 		t.Errorf("access_token: want %q, got %q", "new-access-token", body["access_token"])
+	}
+}
+
+// TestApiEnv_MultiCallHandlerStaysOnOneEnvironment pins the riskiest shape in the
+// migration: handlers that resolve the base URL once and then issue several upstream
+// calls. Mixing environments mid-operation (read the placement from acceptance, PUT the
+// zone on production) would corrupt data on both instances, so every call of the
+// five-call placement update must land on the selected one.
+func TestApiEnv_MultiCallHandlerStaysOnOneEnvironment(t *testing.T) {
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/": func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("production upstream must not be called for X-Api-Env: acceptance, got %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	})
+	var acceptancePaths []string
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v2/publishers/42/placements": func(w http.ResponseWriter, r *http.Request) {
+			acceptancePaths = append(acceptancePaths, r.Method+" "+r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"publisher_placements_v2":[{"id":101,"name":"Screen A","placement_status":true,"inventory_id":100,"zone_id":200}]}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100": func(w http.ResponseWriter, r *http.Request) {
+			acceptancePaths = append(acceptancePaths, r.Method+" "+r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"name":"Screen A","url":"example.com","max_defaults":1}`))
+		},
+		"/publisher/v1/publishers/42/inventories/100/zones/200/placements/101": func(w http.ResponseWriter, r *http.Request) {
+			acceptancePaths = append(acceptancePaths, r.Method+" "+r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodGet {
+				w.Write([]byte(`{"name":"Screen A","placement_status":true,"appnexus":false}`))
+				return
+			}
+			w.Write([]byte(`{"id":101}`))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	body, _ := json.Marshal(map[string]any{
+		"name": "Screen A", "url": "example.com", "max_defaults": 1, "appnexus": false, "placement_status": false,
+	})
+	req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101", bytes.NewReader(body))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Api-Env", "acceptance")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if len(acceptancePaths) != 5 {
+		t.Errorf("acceptance upstream calls: want all 5 of them, got %d: %v", len(acceptancePaths), acceptancePaths)
+	}
+}
+
+// TestApiEnv_ReportRouteHonoursAcceptance covers the /api/report/* family, whose
+// handlers resolve the environment separately from the publisher handlers.
+func TestApiEnv_ReportRouteHonoursAcceptance(t *testing.T) {
+	production := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("production upstream must not be called for X-Api-Env: acceptance")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+	})
+	acceptanceCalled := false
+	acceptance := mockUpstream(t, map[string]http.HandlerFunc{
+		"/report/preview": func(w http.ResponseWriter, _ *http.Request) {
+			acceptanceCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockReportPreviewBody))
+		},
+	})
+
+	app := appServerEnvs(t, production.URL, acceptance.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/report/placement/42/101",
+		strings.NewReader(`{"date_range":{"quick":"LAST_7_DAYS"}}`))
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("X-Api-Env", "acceptance")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if !acceptanceCalled {
+		t.Error("upstream: want the acceptance mock to serve the report preview, it was not called")
+	}
+}
+
+// TestApiEnv_UnknownEnvironmentIsRejectedBeforeReadOnly pins the middleware order:
+// apiEnvMiddleware wraps readOnlyMiddleware, so a typo'd environment is reported as
+// such (400) even on a path the read-only allowlist would otherwise reject with 405.
+func TestApiEnv_UnknownEnvironmentIsRejectedBeforeReadOnly(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream must not be called for an unknown environment")
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	})
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodPost, app.URL+"/api/publishers/42", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	req.Header.Set("X-Api-Env", "bogus")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: want 400, got %d", resp.StatusCode)
+	}
+	// The 400 is written inside corsMiddleware, so a browser can actually read it.
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("Access-Control-Allow-Origin: want the configured origin, got %q", got)
 	}
 }
 

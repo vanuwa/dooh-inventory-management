@@ -4,8 +4,8 @@ import "testing"
 
 func TestEnv(t *testing.T) {
 	cfg := &Config{Environments: map[string]Environment{
-		EnvProduction: {Name: EnvProduction, BaseURL: "https://prod.example", ClientID: "id", ClientSecret: "secret"},
-		EnvAcceptance: {Name: EnvAcceptance, BaseURL: "https://acc.example", ClientID: "id", ClientSecret: "secret"},
+		EnvProduction: {BaseURL: "https://prod.example", ClientID: "id", ClientSecret: "secret"},
+		EnvAcceptance: {BaseURL: "https://acc.example", ClientID: "id", ClientSecret: "secret"},
 	}}
 
 	t.Run("empty name selects production", func(t *testing.T) {
@@ -13,7 +13,7 @@ func TestEnv(t *testing.T) {
 		if !ok {
 			t.Fatal("want ok for empty name")
 		}
-		if env.Name != EnvProduction || env.BaseURL != "https://prod.example" {
+		if env.BaseURL != "https://prod.example" {
 			t.Errorf("want production entry, got %+v", env)
 		}
 	})
@@ -79,14 +79,14 @@ func TestLoadExplicitEnvVars(t *testing.T) {
 	cfg := Load()
 
 	prod, _ := cfg.Env(EnvProduction)
-	want := Environment{Name: EnvProduction, BaseURL: "https://prod.example", ClientID: "cid", ClientSecret: "csecret"}
+	want := Environment{BaseURL: "https://prod.example", ClientID: "cid", ClientSecret: "csecret"}
 	if prod != want {
 		t.Errorf("production: want %+v, got %+v", want, prod)
 	}
 
 	// acceptance reuses the production OAuth client.
 	acc, _ := cfg.Env(EnvAcceptance)
-	want = Environment{Name: EnvAcceptance, BaseURL: "https://acc.example", ClientID: "cid", ClientSecret: "csecret"}
+	want = Environment{BaseURL: "https://acc.example", ClientID: "cid", ClientSecret: "csecret"}
 	if acc != want {
 		t.Errorf("acceptance: want %+v, got %+v", want, acc)
 	}

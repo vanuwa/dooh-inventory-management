@@ -126,8 +126,12 @@ container start:
 | **Production** (default) | `api.360yield.com` | `IMPROVE_API_BASE_URL` | `https://api.360yield.com` |
 | **Acceptance** | `api.360yielddev.com` | `IMPROVE_ACCEPTANCE_API_BASE_URL` | `https://api.360yielddev.com` |
 
-Both defaults are already set in `compose.yaml`, so nothing needs to go in `.env`
-unless you want to point an environment somewhere else.
+Both variables are interpolated in `compose.yaml` with those defaults, so nothing
+needs to go in `.env` unless you want to point an environment somewhere else — set
+either variable there and `make up` picks it up. The environment labels and hosts shown
+in the UI (header strip, login selector) are the defaults hardcoded in
+`frontend/src/constants/apiEnvironments.js`; overriding a base URL does not change
+them (see `TECH_DEBT.md`).
 
 **No extra credentials are needed.** The same `IMPROVE_CLIENT_ID` /
 `IMPROVE_CLIENT_SECRET` is valid against both instances, so the acceptance entry
@@ -141,8 +145,13 @@ Use the environment dropdown in the header, next to the user avatar. The login p
 has its own selector, since the header is not rendered there and you need to pick the
 instance before typing credentials.
 
-- Switching does a **full page reload** to `/recent` — in-flight requests and cached
-  page state carry publisher/placement IDs that mean nothing in the other instance.
+- Switching **from the header** does a **full page reload** to `/recent` — in-flight
+  requests and cached page state carry publisher/placement IDs that mean nothing in the
+  other instance. The login-page selector does not reload (that would wipe a half-typed
+  form); it records the choice and re-reads the tokens for the newly picked instance, so
+  if you are already signed in there you go straight through.
+- The selection is shared by every tab of the browser, so switching in one tab makes the
+  others reload into it too, rather than leave them showing the wrong environment.
 - When the active environment is not production, a non-dismissible orange strip under
   the header names it and its host, so an acceptance session cannot be mistaken for a
   production one.

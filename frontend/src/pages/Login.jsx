@@ -2,19 +2,18 @@ import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { API_ENVIRONMENTS } from '../constants/apiEnvironments.js'
-import { readApiEnv, writeApiEnv } from '../utils/apiEnvironment.js'
 
 export default function Login() {
-  const { isAuthenticated, login } = useAuth()
+  // Layout (and its switcher) is not rendered on /login, so the form carries its own
+  // selector. selectApiEnv rather than switchApiEnv: the latter reloads the page, which
+  // would wipe a half-typed form. It still re-reads the tokens for the newly picked
+  // environment, so an existing session there is picked up by the redirect below.
+  const { isAuthenticated, login, apiEnv, selectApiEnv } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  // Layout (and its switcher) is not rendered on /login, so the form carries its
-  // own selector. Local state rather than switchApiEnv: that one reloads the page,
-  // which would wipe a half-typed form.
-  const [apiEnv, setApiEnv] = useState(() => readApiEnv())
   const apiEnvHost = API_ENVIRONMENTS.find(e => e.name === apiEnv)?.host
 
   if (isAuthenticated) return <Navigate to="/recent" replace />
@@ -26,7 +25,7 @@ export default function Login() {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Env': readApiEnv() },
+        headers: { 'Content-Type': 'application/json', 'X-Api-Env': apiEnv },
         body: JSON.stringify({ username, password }),
       })
       if (!res.ok) {
@@ -53,10 +52,8 @@ export default function Login() {
             id="api-env"
             style={s.input}
             value={apiEnv}
-            onChange={e => {
-              setApiEnv(e.target.value)
-              writeApiEnv(e.target.value)
-            }}
+            disabled={loading}
+            onChange={e => selectApiEnv(e.target.value)}
           >
             {API_ENVIRONMENTS.map(env => (
               <option key={env.name} value={env.name}>{env.label}</option>

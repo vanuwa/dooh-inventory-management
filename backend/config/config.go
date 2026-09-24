@@ -8,9 +8,8 @@ const (
 )
 
 // Environment is one upstream SSP instance: where it lives and which OAuth client
-// speaks to it.
+// speaks to it. The name is the key it is stored under in Config.Environments.
 type Environment struct {
-	Name         string
 	BaseURL      string
 	ClientID     string
 	ClientSecret string
@@ -30,13 +29,11 @@ func Load() *Config {
 	// production and acceptance share one OAuth client today; the per-environment
 	// fields mean diverging later is a change here and nowhere else.
 	production := Environment{
-		Name:         EnvProduction,
 		BaseURL:      getEnv("IMPROVE_API_BASE_URL", "https://api.360yield.com"),
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 	}
 	acceptance := Environment{
-		Name:         EnvAcceptance,
 		BaseURL:      getEnv("IMPROVE_ACCEPTANCE_API_BASE_URL", "https://api.360yielddev.com"),
 		ClientID:     clientID,
 		ClientSecret: clientSecret,

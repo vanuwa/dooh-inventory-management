@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useVersionCheck } from '../hooks/useVersionCheck.js'
-import { API_ENVIRONMENTS, DEFAULT_API_ENV } from '../constants/apiEnvironments.js'
+import { API_ENVIRONMENTS } from '../constants/apiEnvironments.js'
+import { apiEnvBanner } from '../utils/apiEnvironment.js'
 
 function UserAvatar() {
   return (
@@ -22,7 +23,7 @@ export default function Layout({ user, children }) {
   const [dismissed, setDismissed] = useState(false)
 
   const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
-  const activeEnv = API_ENVIRONMENTS.find(e => e.name === apiEnv)
+  const envBanner = apiEnvBanner(apiEnv)
 
   function handleLogout() {
     logout()
@@ -63,11 +64,7 @@ export default function Layout({ user, children }) {
           <button style={s.logoutBtn} onClick={handleLogout}>Logout</button>
         </div>
       </header>
-      {apiEnv !== DEFAULT_API_ENV && activeEnv && (
-        <div style={s.envBanner}>
-          {activeEnv.label} environment — {activeEnv.host}
-        </div>
-      )}
+      {envBanner && <div style={s.envBanner}>{envBanner}</div>}
       {isOutdated && !dismissed && (
         <div style={s.updateBanner}>
           <span>

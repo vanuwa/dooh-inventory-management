@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { isKnownApiEnv, scopedKey, readApiEnv, writeApiEnv, migrateLegacyKeys } from './apiEnvironment.js'
+import {
+  apiEnvBanner,
+  isKnownApiEnv,
+  scopedKey,
+  readApiEnv,
+  writeApiEnv,
+  migrateLegacyKeys,
+} from './apiEnvironment.js'
+import { DEFAULT_API_ENV } from '../constants/apiEnvironments.js'
 
 // vitest runs in the node environment here (no jsdom), so there is no localStorage
 // global — hence the optional storage argument on the three storage helpers.
@@ -32,6 +40,29 @@ describe('isKnownApiEnv', () => {
     expect(isKnownApiEnv('')).toBe(false)
     expect(isKnownApiEnv(null)).toBe(false)
     expect(isKnownApiEnv(undefined)).toBe(false)
+  })
+})
+
+describe('DEFAULT_API_ENV', () => {
+  it('is one of the configured environments', () => {
+    // If it ever drifts the proxy answers 400 for every request and the accent
+    // strip is suppressed, because every environment then looks like the default.
+    expect(isKnownApiEnv(DEFAULT_API_ENV)).toBe(true)
+  })
+})
+
+describe('apiEnvBanner', () => {
+  it('names a non-default environment and its host', () => {
+    expect(apiEnvBanner('acceptance')).toBe('Acceptance environment — api.360yielddev.com')
+  })
+
+  it('returns null for the default environment, so no strip is shown', () => {
+    expect(apiEnvBanner(DEFAULT_API_ENV)).toBeNull()
+  })
+
+  it('returns null for an unknown environment', () => {
+    expect(apiEnvBanner('bogus')).toBeNull()
+    expect(apiEnvBanner(undefined)).toBeNull()
   })
 })
 
@@ -127,5 +158,23 @@ describe('migrateLegacyKeys', () => {
 
   it('does not throw when storage throws', () => {
     expect(() => migrateLegacyKeys(throwingStorage())).not.toThrow()
+  })
+})
+
+// The default storage argument is resolved inside a try/catch, so a context where
+// merely touching localStorage throws (blocked site data, sandboxed iframe — here,
+// the node test environment, which has no localStorage global) degrades to the
+// default instead of throwing at module scope and blanking the app at boot.
+describe('default storage', () => {
+  it('readApiEnv falls back to production without throwing', () => {
+    expect(readApiEnv()).toBe(DEFAULT_API_ENV)
+  })
+
+  it('writeApiEnv does not throw', () => {
+    expect(() => writeApiEnv('acceptance')).not.toThrow()
+  })
+
+  it('migrateLegacyKeys does not throw', () => {
+    expect(() => migrateLegacyKeys()).not.toThrow()
   })
 })
