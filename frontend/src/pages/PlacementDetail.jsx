@@ -61,7 +61,13 @@ const FIELD_HELP = {
 
 const FIELD_OPTIONS = {
   orientation: ['', 'landscape', 'portrait', 'square'],
-  status: ['active', 'inactive'],
+  status: ['active', 'inactive', 'deleted'],
+}
+
+// `deleted` is an edit-only option: a screen cannot sensibly be born deleted, and upstream rejects
+// the next POST of a soft-deleted player_id as a duplicate
+function statusOptionsFor(createMode) {
+  return createMode ? FIELD_OPTIONS.status.filter(opt => opt !== 'deleted') : FIELD_OPTIONS.status
 }
 
 function coerceTypes(vals) {
@@ -780,7 +786,7 @@ export default function PlacementDetail() {
                                       }}
                                       style={validationErrors[field] ? s_editInputError : s.editInput}
                                     >
-                                      {FIELD_OPTIONS[field].map(opt => (
+                                      {(field === 'status' ? statusOptionsFor(createMode) : FIELD_OPTIONS[field]).map(opt => (
                                         <option key={opt} value={opt}>{opt === '' ? '—' : opt}</option>
                                       ))}
                                     </select>
