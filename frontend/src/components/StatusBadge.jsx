@@ -8,11 +8,11 @@ const badge = {
   fontWeight: 500,
 }
 
+// The binary badge takes its colours from the same palette as the screen-status one, so the
+// green and the grey are defined in a single place; only the labels are the caller's.
 export function StatusBadge({ active, labels = ['Active', 'Inactive'] }) {
-  const style = active
-    ? { ...badge, background: '#dcfce7', color: '#15803d' }
-    : { ...badge, background: '#f3f4f6', color: '#6b7280' }
-  return <span style={style}>{active ? labels[0] : labels[1]}</span>
+  const { background, color } = screenStatusBadge(active ? 'active' : 'inactive')
+  return <span style={{ ...badge, background, color }}>{active ? labels[0] : labels[1]}</span>
 }
 
 // A screen's `status` is a three-state string, not a boolean, so it gets its own badge

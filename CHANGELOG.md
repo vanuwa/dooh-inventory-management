@@ -8,6 +8,8 @@
 - The Screens status filter gained a **Deleted only** option, and deleted screens show a distinct rose **Deleted** badge in the grid and in the delete dialog instead of being labelled Inactive. **All** is unchanged and still lists active and inactive screens only — deleted ones are reached through the new option
 - The screen edit modal can now set the status to **deleted** (and back to **active**) for a single screen without going through Select mode; the create form still offers only Active and Inactive
 - When a soft delete is rejected because one of the selected screens no longer passes upstream validation, the error names the offending **screen id and player id** instead of the position in the request array, so the row can be unticked and the rest retried
+- A selected screen whose record is missing one of the ten fields the SSP requires on every update (player id, resolution, venue type and taxonomy, coordinates, country, city, allowed content) is now flagged in the delete dialog with the fields it lacks, and Confirm stays disabled until it is unticked or **Permanently delete instead** is ticked — previously such a legacy row failed the whole batch with an error that named no screen
+- Soft delete is an ordinary screen edit upstream, so it works with any account that can edit screens — wider than the permanent delete, which stays `ADMINISTRATOR`-only. Grant screen-edit rights with that in mind
 - The portal can now talk to either SSP instance without a rebuild: an environment switcher in the header (and on the login page) selects **Production** (`api.360yield.com`) or **Acceptance** (`api.360yielddev.com`), and every `/api/...` call carries the choice as an `X-Api-Env` header that the Go proxy resolves per request
 - Both the upstream base URL and the OAuth client used to mint the token follow the selection, so an access token is always issued by the instance it is spent on; the same `IMPROVE_CLIENT_ID` / `IMPROVE_CLIENT_SECRET` is valid on both, so switching needs no extra secrets
 - Tokens and recent-activity history are namespaced per environment in localStorage, so you stay logged into production and acceptance at the same time and switching does not log either session out; existing unscoped keys are migrated to production on first load, so nobody is logged out by the upgrade
@@ -15,6 +17,7 @@
 - A request naming an unconfigured environment is rejected with `400 unknown api environment` before it reaches any upstream, while a request with no header keeps behaving exactly as before (production), so an older cached bundle continues to work
 
 ### Known limitations
+- Soft-deleted screens still appear on the **DOOH Metadata** page and its map. That page reads a different admin endpoint, which will stop returning deleted rows when SSP-1126 ships; until then its counts include screens the Screens tab lists only under **Deleted only**
 - **Copy VAST Tag** still builds a production `https://ad.360yield.com/...` URL. That is the ad server rather than the API, and it is intentionally not switched — on acceptance the copied tag therefore points at the production ad server while carrying acceptance IDs
 
 ## 2026-09-23

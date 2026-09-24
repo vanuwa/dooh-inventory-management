@@ -12,7 +12,7 @@ import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError } from '../utils/formatApiError.js'
-import { SCREEN_STATUS_OPTIONS } from '../utils/screenStatus.js'
+import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, screensQuery, labelBatchErrors } from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -66,9 +66,7 @@ const FIELD_OPTIONS = {
 
 // `deleted` is an edit-only option: a screen cannot sensibly be born deleted, and upstream rejects
 // the next POST of a soft-deleted player_id as a duplicate
-function statusOptionsFor(createMode) {
-  return createMode ? FIELD_OPTIONS.status.filter(opt => opt !== 'deleted') : FIELD_OPTIONS.status
-}
+const CREATE_STATUS_OPTIONS = FIELD_OPTIONS.status.filter(opt => opt !== 'deleted')
 
 function coerceTypes(vals) {
   const intFields = ['publisher_id', 'placement_id', 'resolution_width', 'resolution_height', 'venue_type_id', 'width', 'height', 'min_duration', 'max_duration']
@@ -112,7 +110,7 @@ export default function PlacementDetail() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const committedSearch = useDebounce(search, 300)
-  const [statusFilter, setStatusFilter] = useState('active')
+  const [statusFilter, setStatusFilter] = useState(DEFAULT_SCREEN_STATUS_FILTER)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const limit = 20
@@ -233,10 +231,8 @@ export default function PlacementDetail() {
   }, [selectedScreen])
 
   function screensPath(forPage, forLimit) {
-    let path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings?page=${forPage}&limit=${forLimit}`
-    if (committedSearch) path += `&search=${encodeURIComponent(committedSearch)}`
-    if (statusFilter) path += `&status=${encodeURIComponent(statusFilter)}`
-    return path
+    return `/publishers/${publisherId}/placements/${placementId}/dooh-settings` +
+      screensQuery({ page: forPage, limit: forLimit, search: committedSearch, status: statusFilter })
   }
 
   useEffect(() => {
@@ -460,7 +456,10 @@ export default function PlacementDetail() {
       )
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
-        setSaveError(formatApiError(errData, `Save failed (${res.status})`))
+        // Upstream indexes a one-element batch too — `placement.dooh.id.required`,
+        // `placement.dooh.duplicate.id` and the not-found `placement.dooh.unknown` all build
+        // `dooh_settings[0]` unconditionally — so label this body as the bulk delete does.
+        setSaveError(formatApiError(labelBatchErrors(errData, [payload]), `Save failed (${res.status})`))
         return
       }
       setDoohSettings(prev => prev.map(sc => sc.id === updated.id ? updated : sc))
@@ -786,7 +785,7 @@ export default function PlacementDetail() {
                                       }}
                                       style={validationErrors[field] ? s_editInputError : s.editInput}
                                     >
-                                      {(field === 'status' ? statusOptionsFor(createMode) : FIELD_OPTIONS[field]).map(opt => (
+                                      {(field === 'status' ? (createMode ? CREATE_STATUS_OPTIONS : FIELD_OPTIONS.status) : FIELD_OPTIONS[field]).map(opt => (
                                         <option key={opt} value={opt}>{opt === '' ? '—' : opt}</option>
                                       ))}
                                     </select>

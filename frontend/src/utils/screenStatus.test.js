@@ -1,9 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { SCREEN_STATUS_OPTIONS, screenStatusBadge, softDeleteBody, labelBatchErrors } from './screenStatus.js'
+import {
+  SCREEN_STATUS_OPTIONS,
+  DEFAULT_SCREEN_STATUS_FILTER,
+  SOFT_DELETE_REQUIRED_FIELDS,
+  screensQuery,
+  screenStatusBadge,
+  softDeleteBody,
+  missingRequiredFields,
+  partitionSoftDeletable,
+  deleteRequest,
+  labelBatchErrors,
+} from './screenStatus.js'
+import { formatApiError } from './formatApiError.js'
 
-// Modelled on a real PlacementDoohItem payload: the six plain Go strings arrive as ""
-// when upstream holds NULL, the pointer fields arrive as null, and lat/lon/width are
-// genuine zeroes that must survive the filter.
+// Modelled on a real PlacementDoohItem payload: the six nullable plain Go strings arrive
+// as "" when upstream holds NULL, every nullable numeric arrives as null, and lat/lon/width
+// are genuine zeroes that must survive the filter.
 function fixtureScreen(overrides = {}) {
   return {
     id: 4711,
@@ -38,25 +50,51 @@ function fixtureScreen(overrides = {}) {
 }
 
 describe('SCREEN_STATUS_OPTIONS', () => {
-  it("contains the 'active' default the Screens tab lands on", () => {
-    expect(SCREEN_STATUS_OPTIONS.map(o => o.value)).toContain('active')
-  })
-
-  it('offers only tokens the upstream status vocabulary defines', () => {
-    const tokens = SCREEN_STATUS_OPTIONS.map(o => o.value).filter(Boolean)
-    expect(tokens).toEqual(['active', 'inactive', 'deleted'])
+  it('is the four-option table the Screens filter renders, All first', () => {
+    expect(SCREEN_STATUS_OPTIONS).toEqual([
+      { value: '', label: 'All' },
+      { value: 'active', label: 'Active only' },
+      { value: 'inactive', label: 'Inactive only' },
+      { value: 'deleted', label: 'Deleted only' },
+    ])
   })
 
   it('has exactly one empty value — the absent-parameter "All"', () => {
-    const empty = SCREEN_STATUS_OPTIONS.filter(o => o.value === '')
-    expect(empty).toHaveLength(1)
-    expect(empty[0].label).toBe('All')
+    expect(SCREEN_STATUS_OPTIONS.filter(o => o.value === '')).toHaveLength(1)
   })
 
-  it('labels every option', () => {
-    for (const option of SCREEN_STATUS_OPTIONS) {
-      expect(option.label).toBeTruthy()
+  it('lands on an option the table actually offers', () => {
+    expect(SCREEN_STATUS_OPTIONS.map(o => o.value)).toContain(DEFAULT_SCREEN_STATUS_FILTER)
+    expect(DEFAULT_SCREEN_STATUS_FILTER).toBe('active')
+  })
+})
+
+describe('screensQuery', () => {
+  const base = { page: 2, limit: 20 }
+
+  it('always carries page and limit', () => {
+    expect(screensQuery({ ...base, search: '', status: '' })).toBe('?page=2&limit=20')
+  })
+
+  it('omits status entirely for "All" — an empty &status= is a 400 upstream', () => {
+    const query = screensQuery({ ...base, search: 'Amsterdam', status: '' })
+    expect(query).not.toContain('status')
+    expect(query).toBe('?page=2&limit=20&search=Amsterdam')
+  })
+
+  it('appends each concrete status token', () => {
+    for (const status of ['active', 'inactive', 'deleted']) {
+      expect(screensQuery({ ...base, search: '', status })).toBe(`?page=2&limit=20&status=${status}`)
     }
+  })
+
+  it('encodes the search term', () => {
+    expect(screensQuery({ ...base, search: 'a&b c', status: 'active' }))
+      .toBe('?page=2&limit=20&search=a%26b%20c&status=active')
+  })
+
+  it('omits an empty search', () => {
+    expect(screensQuery({ ...base, search: '', status: 'active' })).toBe('?page=2&limit=20&status=active')
   })
 })
 
@@ -102,6 +140,14 @@ describe('softDeleteBody', () => {
     expect(row).not.toHaveProperty('height')
   })
 
+  it('drops a NULL required column too — such a row is blocked before it is ever sent', () => {
+    const [row] = softDeleteBody([fixtureScreen({ lat: null, country_code: '' })]).dooh_settings
+    expect(row).not.toHaveProperty('lat')
+    expect(row).not.toHaveProperty('country_code')
+    // and that is exactly why partitionSoftDeletable has to stop the row first
+    expect(missingRequiredFields(fixtureScreen({ lat: null, country_code: '' }))).toEqual(['lat', 'country_code'])
+  })
+
   it('keeps a set value in a field that is usually empty', () => {
     const [row] = softDeleteBody([fixtureScreen({ region: 'NH', cpm: 1.5, currency_code: 'EUR' })]).dooh_settings
     expect(row.region).toBe('NH')
@@ -122,6 +168,75 @@ describe('softDeleteBody', () => {
   })
 })
 
+describe('missingRequiredFields', () => {
+  it('reports nothing for a complete row', () => {
+    expect(missingRequiredFields(fixtureScreen())).toEqual([])
+  })
+
+  it('treats a numeric zero as supplied — lat 0 is a real coordinate', () => {
+    expect(missingRequiredFields(fixtureScreen({ lat: 0, lon: 0 }))).toEqual([])
+  })
+
+  it('reports a NULL numeric column, which the proxy now sends as null', () => {
+    expect(missingRequiredFields(fixtureScreen({ lat: null, venue_type_id: null })))
+      .toEqual(['venue_type_id', 'lat'])
+  })
+
+  it('reports the empty string our proxy sends for a NULL required string column', () => {
+    expect(missingRequiredFields(fixtureScreen({ country_code: '', city: '', allowed_content: '', venue_type_tax: '' })))
+      .toEqual(['venue_type_tax', 'country_code', 'city', 'allowed_content'])
+  })
+
+  it('covers exactly the ten fields upstream marks required', () => {
+    expect(SOFT_DELETE_REQUIRED_FIELDS).toEqual([
+      'player_id', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax',
+      'lat', 'lon', 'country_code', 'city', 'allowed_content',
+    ])
+  })
+})
+
+describe('partitionSoftDeletable', () => {
+  it('keeps complete rows and blocks incomplete ones, with what each is missing', () => {
+    const good = fixtureScreen()
+    const bad = fixtureScreen({ id: 4712, city: '' })
+    const { deletable, blocked } = partitionSoftDeletable([good, bad])
+    expect(deletable).toEqual([good])
+    expect(blocked).toEqual([{ row: bad, missing: ['city'] }])
+  })
+
+  it('blocks nothing when every row is complete', () => {
+    const { deletable, blocked } = partitionSoftDeletable([fixtureScreen(), fixtureScreen({ id: 4712 })])
+    expect(deletable).toHaveLength(2)
+    expect(blocked).toEqual([])
+  })
+})
+
+describe('deleteRequest', () => {
+  const rows = [fixtureScreen(), fixtureScreen({ id: 4712, player_id: 'test-player-043' })]
+  const ctx = { publisherId: 42, placementId: 101 }
+
+  it('sends the checked rows as a soft-delete PUT body, not the ids', () => {
+    const { path, options } = deleteRequest({ rows, hardDelete: false, ...ctx })
+    expect(path).toBe('/publishers/42/placements/101/dooh-settings')
+    expect(options.method).toBe('PUT')
+    const body = JSON.parse(options.body)
+    expect(body.dooh_settings.map(r => r.id)).toEqual([4711, 4712])
+    expect(body.dooh_settings.map(r => r.status)).toEqual(['deleted', 'deleted'])
+  })
+
+  it('builds the body from the rows it is handed and nothing else', () => {
+    const { options } = deleteRequest({ rows: [rows[1]], hardDelete: false, ...ctx })
+    expect(JSON.parse(options.body).dooh_settings.map(r => r.id)).toEqual([4712])
+  })
+
+  it('sends only the ids as a hard-delete DELETE selector, with no body', () => {
+    const { path, options } = deleteRequest({ rows, hardDelete: true, ...ctx })
+    expect(path).toBe('/publishers/42/placements/101/dooh-settings?ids=4711,4712')
+    expect(options.method).toBe('DELETE')
+    expect(options.body).toBeUndefined()
+  })
+})
+
 describe('labelBatchErrors', () => {
   const rows = [fixtureScreen(), fixtureScreen({ id: 4712, player_id: 'test-player-043' })]
 
@@ -138,7 +253,7 @@ describe('labelBatchErrors', () => {
     expect(labelBatchErrors(body, rows).messages[0].property_name).toBe('screen 4711 (test-player-042)')
   })
 
-  it('passes a bare property through untouched (the single-row PUT is never indexed)', () => {
+  it('passes a property with no dooh_settings[i] prefix through untouched', () => {
     const body = { messages: [{ property_name: 'venue_type_tax', description: 'not found' }] }
     expect(labelBatchErrors(body, rows).messages[0].property_name).toBe('venue_type_tax')
   })
@@ -166,6 +281,25 @@ describe('labelBatchErrors', () => {
       description: 'must be positive',
       error_code: 'x',
     })
+  })
+
+  it('names a screen with no player_id without empty parentheses', () => {
+    const body = { messages: [{ property_name: 'dooh_settings[0].cpm', description: 'bad' }] }
+    expect(labelBatchErrors(body, [fixtureScreen({ player_id: '' })]).messages[0].property_name)
+      .toBe('screen 4711 — cpm')
+  })
+
+  it('renders through formatApiError, the only way it is ever used', () => {
+    const body = {
+      messages: [
+        { property_name: 'dooh_settings[1].venue_type_tax', description: "taxonomy 'X' not found" },
+        { property_name: 'dooh_settings[0]', description: 'DOOH setting not found with id 4711' },
+      ],
+    }
+    expect(formatApiError(labelBatchErrors(body, rows), 'Delete failed (400)')).toBe(
+      "screen 4712 (test-player-043) — venue_type_tax: taxonomy 'X' not found\n" +
+      'screen 4711 (test-player-042): DOOH setting not found with id 4711'
+    )
   })
 
   it('does not mutate the body it is given', () => {

@@ -77,6 +77,12 @@ type publisherPlacementsResponse struct {
 	Limit      int                  `json:"limit"`
 }
 
+// PlacementDoohItem mirrors one upstream PlacementDoohDto. Every column that is nullable
+// upstream is a pointer here so an upstream NULL round-trips as JSON null rather than as a
+// zero value: lat/lon/resolution_width/resolution_height/venue_type_id are plain nullable
+// @Column(s) on the PlacementDooh entity, and decoding a NULL lat into a float64 would hand
+// the browser 0 — a valid WGS84 coordinate that the soft delete would then write back,
+// silently moving the screen to Null Island.
 type PlacementDoohItem struct {
 	ID                int64    `json:"id"`
 	PublisherID       int64    `json:"publisher_id"`
@@ -86,12 +92,12 @@ type PlacementDoohItem struct {
 	DeviceID          string   `json:"device_id"`
 	ScreenImgURL      string   `json:"screen_img_url"`
 	Orientation       string   `json:"orientation"`
-	ResolutionWidth   int32    `json:"resolution_width"`
-	ResolutionHeight  int32    `json:"resolution_height"`
-	VenueTypeID       int32    `json:"venue_type_id"`
+	ResolutionWidth   *int32   `json:"resolution_width"`
+	ResolutionHeight  *int32   `json:"resolution_height"`
+	VenueTypeID       *int32   `json:"venue_type_id"`
 	VenueTypeTax      string   `json:"venue_type_tax"`
-	Lat               float64  `json:"lat"`
-	Lon               float64  `json:"lon"`
+	Lat               *float64 `json:"lat"`
+	Lon               *float64 `json:"lon"`
 	CountryCode       string   `json:"country_code"`
 	Region            string   `json:"region"`
 	City              string   `json:"city"`
@@ -1140,6 +1146,10 @@ func (h *PublishersHandler) UpdatePublisherPlacement(w http.ResponseWriter, r *h
 	writeProxyResponse(w, plStatus, plResp, plHeaders)
 }
 
+// doohSettingsMaxBody caps the PUT/POST body this proxy will buffer. It mirrors
+// client_max_body_size in frontend/nginx.conf, which is sized for a 1000-row soft delete.
+const doohSettingsMaxBody = 8 << 20
+
 func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Request, method, query string) {
 	placementID := url.PathEscape(r.PathValue("placementId"))
 	accessToken := r.Header.Get("X-Access-Token")
@@ -1152,7 +1162,10 @@ func (h *PublishersHandler) proxyDoohSettings(w http.ResponseWriter, r *http.Req
 	contentType := ""
 	if method != http.MethodDelete {
 		var err error
-		bodyBytes, err = io.ReadAll(r.Body)
+		// Bounded at the same 8 MB nginx allows, so `npm run dev` (Vite proxies straight to
+		// :8080 with no nginx in front) and any direct caller share the in-Docker ceiling
+		// instead of being able to buffer an unbounded body here.
+		bodyBytes, err = io.ReadAll(http.MaxBytesReader(w, r.Body, doohSettingsMaxBody))
 		if err != nil {
 			http.Error(w, "failed to read request body", http.StatusBadRequest)
 			return

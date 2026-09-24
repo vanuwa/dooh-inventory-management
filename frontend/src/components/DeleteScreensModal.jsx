@@ -5,7 +5,7 @@ import { modalStyles } from './CreateUserModal.jsx'
 import { tableStyles } from '../styles/tables.js'
 import { fmtPublisher } from '../utils/format.js'
 import { formatApiError } from '../utils/formatApiError.js'
-import { softDeleteBody, labelBatchErrors } from '../utils/screenStatus.js'
+import { deleteRequest, labelBatchErrors, partitionSoftDeletable } from '../utils/screenStatus.js'
 
 export default function DeleteScreensModal({ screens, publisherId, placementId, publisherName, onClose, onDeleted }) {
   const [checked, setChecked] = useState(() => new Set(screens.map(sc => sc.id)))
@@ -17,6 +17,14 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
 
   const allChecked = screens.length > 0 && screens.every(sc => checked.has(sc.id))
   const someChecked = screens.some(sc => checked.has(sc.id))
+
+  const rows = screens.filter(sc => checked.has(sc.id))
+  // The soft delete is a full-row PUT, and upstream rejects a row that cannot supply every
+  // required field — as an unattributable 400 or a raw 500, naming no screen. Catch those
+  // rows here instead, while their ids are still in hand. The permanent delete validates
+  // nothing, so it is the way out.
+  const blocked = hardDelete ? [] : partitionSoftDeletable(rows).blocked
+  const blockedIds = new Set(blocked.map(b => b.row.id))
 
   useEffect(() => {
     if (headerCbRef.current) headerCbRef.current.indeterminate = someChecked && !allChecked
@@ -36,31 +44,27 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
   }
 
   async function handleConfirm() {
-    if (submitting || checked.size === 0) return
+    if (submitting || rows.length === 0 || blocked.length > 0) return
     setSubmitting(true)
     setError('')
-    // Built once and used for both the request and the error labelling: upstream keys batch
-    // errors by the row's position in the array we sent, so a second, separately built array
-    // could name the wrong screen.
-    const rows = screens.filter(sc => checked.has(sc.id))
     const ids = rows.map(sc => sc.id)
-    const path = `/publishers/${publisherId}/placements/${placementId}/dooh-settings`
     let ok = false
     try {
-      const res = hardDelete
-        ? await apiFetch(`${path}?ids=${ids.join(',')}`, { method: 'DELETE' })
-        : await apiFetch(path, { method: 'PUT', body: JSON.stringify(softDeleteBody(rows)) })
+      // `rows` — the *checked* subset — shapes both the request and the error labelling:
+      // upstream keys batch errors by the row's position in the array we sent, so a second,
+      // separately built array could name the wrong screen.
+      const { path, options } = deleteRequest({ rows, hardDelete, publisherId, placementId })
+      const res = await apiFetch(path, options)
       if (res.ok) {
         ok = true
       } else {
         const errData = await res.json().catch(() => ({}))
-        // Only the soft delete is labelled: upstream reports hard-delete failures against
-        // `ids`, not an array index, so that body is rendered exactly as it is today.
-        const body = hardDelete ? errData : labelBatchErrors(errData, rows)
-        setError(formatApiError(body, `Delete failed (${res.status})`))
+        setError(formatApiError(labelBatchErrors(errData, rows), `Delete failed (${res.status})`))
       }
     } catch (err) {
-      if (err.message !== 'Unauthorized') setError('Delete failed.')
+      // A transport failure says nothing about the upstream transaction — a timeout on a
+      // 1000-row soft delete can well have committed — so do not claim it did not happen.
+      if (err.message !== 'Unauthorized') setError('Delete failed to complete. It may or may not have been applied — close this dialog and refresh the grid to check.')
     }
     if (!ok) {
       setSubmitting(false)
@@ -84,11 +88,19 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
         <p style={s.warning}>
           {hardDelete
             ? 'This permanently deletes the screens below. This cannot be undone.'
-            : 'This marks the screens below as deleted. They stop serving and are hidden from the default view, and can be restored by setting the status back to active.'}
+            : 'This marks the screens below as deleted. They stop serving and drop out of the Active only and All filters — they stay listed under Deleted only — and can be restored by setting the status back to active.'}
         </p>
 
         <div style={s.modalBody} ref={bodyRef}>
           {error && <p style={s.error}>{error}</p>}
+          {blocked.length > 0 && (
+            <p style={s.blockedNotice}>
+              {`${blocked.length} of the selected screen${blocked.length === 1 ? ' has' : 's have'} no value stored for a field upstream requires on every update, so ${blocked.length === 1 ? 'it' : 'they'} cannot be marked deleted. Untick ${blocked.length === 1 ? 'it' : 'them'}, or tick "Permanently delete instead", which validates nothing.\n`}
+              {blocked.map(({ row, missing }) =>
+                `\nscreen ${row.id}${row.player_id ? ` (${row.player_id})` : ''} — missing ${missing.join(', ')}`
+              ).join('')}
+            </p>
+          )}
           <table style={s.table}>
             <thead>
               <tr>
@@ -120,7 +132,10 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
                       aria-label={`Select screen ${sc.id}`}
                     />
                   </td>
-                  <td style={s.td}>{sc.id}</td>
+                  <td style={s.td}>
+                    {sc.id}
+                    {blockedIds.has(sc.id) && <span style={s.blockedMark} title="Missing a field upstream requires; can only be deleted permanently">&nbsp;⚠</span>}
+                  </td>
                   <td style={s.td}>{sc.player_id || '—'}</td>
                   <td style={s.td}><ScreenStatusBadge status={sc.status} /></td>
                   <td style={s.td}>{sc.placement_id || '—'}</td>
@@ -145,9 +160,9 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
         <div style={s.modalFooter}>
           <button style={s.cancelBtn} onClick={onClose} disabled={submitting}>Cancel</button>
           <button
-            style={checked.size === 0 || submitting ? s_confirmBtnDisabled : s.confirmBtn}
+            style={checked.size === 0 || blocked.length > 0 || submitting ? s_confirmBtnDisabled : s.confirmBtn}
             onClick={handleConfirm}
-            disabled={checked.size === 0 || submitting}
+            disabled={checked.size === 0 || blocked.length > 0 || submitting}
           >
             {submitting && <span style={s.spinnerSm} />}
             {submitting ? 'Deleting…' : 'Confirm Deletion'}
@@ -165,6 +180,8 @@ const s = {
   modalBody: { ...modalStyles.modalBody, maxHeight: '60vh' },
   // one upstream message per offending id, so this can run to hundreds of lines: keep it bounded and scrollable
   error: { ...modalStyles.error, fontSize: '0.8125rem', marginTop: 0, marginBottom: '0.75rem', whiteSpace: 'pre-line', maxHeight: '30vh', overflowY: 'auto' },
+  blockedNotice: { margin: '0 0 0.75rem', padding: '0.5rem 0.75rem', borderRadius: 4, background: '#fff7ed', border: '1px solid #fb923c', color: '#7c2d12', fontSize: '0.8125rem', whiteSpace: 'pre-line', maxHeight: '30vh', overflowY: 'auto' },
+  blockedMark: { color: '#b45309' },
   warning: { margin: '0 0 1rem', fontSize: '0.875rem', color: '#374151', flexShrink: 0 },
   hardDeleteRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.75rem 0 0', fontSize: '0.875rem', color: '#374151', cursor: 'pointer', flexShrink: 0 },
   table: { width: '100%', borderCollapse: 'collapse' },

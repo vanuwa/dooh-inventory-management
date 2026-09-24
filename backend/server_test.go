@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -585,6 +586,55 @@ func TestPlacementDoohSettings_Success(t *testing.T) {
 	}
 }
 
+// TestPlacementDoohSettings_PreservesNullColumns pins the round trip for the columns that
+// are nullable on the upstream PlacementDooh entity: they must stay JSON null rather than
+// decode into a zero value. A NULL lat/lon arriving as 0 would be a valid WGS84 coordinate
+// that the soft delete writes straight back, relocating the screen to Null Island; a NULL
+// resolution or venue type arriving as 0 would be written back as a bogus positive-number
+// failure. The soft-delete body builder drops a null but keeps a 0, so this is what makes
+// its filter sufficient.
+func TestPlacementDoohSettings_PreservesNullColumns(t *testing.T) {
+	const upstreamBody = `{"dooh_settings":[{"id":4711,"player_id":"p-1","status":"active","lat":null,"lon":null,"resolution_width":null,"resolution_height":null,"venue_type_id":null,"country_code":"NL","city":"Amsterdam"}],"totalNumberOfElemements":1}`
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(upstreamBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/api/publishers/42/placements/101/dooh-settings", nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		DoohSettings []map[string]any `json:"dooh_settings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.DoohSettings) != 1 {
+		t.Fatalf("dooh_settings: want 1, got %d", len(body.DoohSettings))
+	}
+	for _, key := range []string{"lat", "lon", "resolution_width", "resolution_height", "venue_type_id"} {
+		value, present := body.DoohSettings[0][key]
+		if !present {
+			t.Errorf("%s: key missing from the proxied row", key)
+			continue
+		}
+		if value != nil {
+			t.Errorf("%s: want null, got %v", key, value)
+		}
+	}
+}
+
 func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
@@ -896,9 +946,62 @@ func maxDoohSelector() string {
 // for a live one.
 var nginxCommentPattern = regexp.MustCompile(`(?m)#.*$`)
 
-// nginxHeaderBufferPattern captures the size operand of large_client_header_buffers in any
-// form nginx accepts: a bare byte count, or a k/K/m/M suffixed one.
-var nginxHeaderBufferPattern = regexp.MustCompile(`large_client_header_buffers\s+\d+\s+(\d+)([kKmM]?)\s*;`)
+// nginxAPILocationPattern captures the body of the `location /api/ { ... }` block, so a
+// directive that only counts inside it is not satisfied by a copy sitting in `location /`,
+// where it would have no effect on a proxied request.
+var nginxAPILocationPattern = regexp.MustCompile(`(?s)location\s+/api/\s*\{(.*?)\n\s*\}`)
+
+// readNginxConf returns frontend/nginx.conf with its comments stripped, or skips the test
+// so `go test ./...` stays usable in a backend-only checkout.
+func readNginxConf(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join("..", "frontend", "nginx.conf")
+	conf, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("skipping: %s not readable: %v", path, err)
+	}
+	return nginxCommentPattern.ReplaceAll(conf, nil)
+}
+
+// nginxOperand parses the numeric operand of a directive plus its unit suffix, applying
+// the multipliers the caller accepts. A directive nginx documents as "0 means unlimited"
+// is reported as math.MaxInt so a floor check treats it as generous, not as too small.
+func nginxOperand(t *testing.T, pattern *regexp.Regexp, conf []byte, multipliers map[string]int, zeroIsUnlimited bool) (int, bool) {
+	t.Helper()
+	m := pattern.FindSubmatch(conf)
+	if m == nil {
+		return 0, false
+	}
+	value, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value == 0 && zeroIsUnlimited {
+		return math.MaxInt, true
+	}
+	suffix := strings.ToLower(string(m[2]))
+	if multiplier, ok := multipliers[suffix]; ok {
+		value *= multiplier
+	}
+	return value, true
+}
+
+// byteSuffixes are the size multipliers nginx accepts on a size operand (an absent suffix
+// means bytes).
+var byteSuffixes = map[string]int{"k": 1024, "m": 1024 * 1024, "g": 1024 * 1024 * 1024}
+
+// timeSuffixes are the multipliers nginx accepts on a time operand — a bare number is
+// seconds, and `m` means minutes rather than the size suffix's megabytes.
+var timeSuffixes = map[string]int{"s": 1, "m": 60, "h": 3600}
+
+// nginxHeaderBufferPattern captures the size operand of large_client_header_buffers.
+var nginxHeaderBufferPattern = regexp.MustCompile(`large_client_header_buffers\s+\d+\s+(\d+)([kKmMgG]?)\s*;`)
+
+// nginxBodySizePattern captures the operand of client_max_body_size.
+var nginxBodySizePattern = regexp.MustCompile(`client_max_body_size\s+(\d+)([kKmMgG]?)\s*;`)
+
+// nginxReadTimeoutPattern captures the operand of proxy_read_timeout.
+var nginxReadTimeoutPattern = regexp.MustCompile(`proxy_read_timeout\s+(\d+)([smhSMH]?)\s*;`)
 
 // TestNginxAllowsMaxDoohSelector guards the one hop this repo controls: the selector
 // travels in the request line, so the bundled nginx must be configured with a
@@ -909,25 +1012,11 @@ var nginxHeaderBufferPattern = regexp.MustCompile(`large_client_header_buffers\s
 // frontend/nginx.conf is installed as /etc/nginx/conf.d/default.conf, which the stock
 // image includes inside the http block, so the directive can only live in server context.
 func TestNginxAllowsMaxDoohSelector(t *testing.T) {
-	path := filepath.Join("..", "frontend", "nginx.conf")
-	conf, err := os.ReadFile(path)
-	if err != nil {
-		// Keep `go test ./...` usable in a backend-only checkout.
-		t.Skipf("skipping: %s not readable: %v", path, err)
-	}
-	m := nginxHeaderBufferPattern.FindSubmatch(nginxCommentPattern.ReplaceAll(conf, nil))
-	if m == nil {
+	conf := readNginxConf(t)
+
+	size, ok := nginxOperand(t, nginxHeaderBufferPattern, conf, byteSuffixes, false)
+	if !ok {
 		t.Fatal("frontend/nginx.conf: large_client_header_buffers not set; the default 8k buffer rejects a 1000-id delete with 414")
-	}
-	size, err := strconv.Atoi(string(m[1]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	switch string(m[2]) {
-	case "k", "K":
-		size *= 1024
-	case "m", "M":
-		size *= 1024 * 1024
 	}
 	// "DELETE /api/publishers/{id}/placements/{id}/dooh-settings?ids=<selector> HTTP/1.1"
 	requestLine := len("DELETE /api/publishers/999999/placements/9999999/dooh-settings?ids= HTTP/1.1") + len(maxDoohSelector())
@@ -935,14 +1024,6 @@ func TestNginxAllowsMaxDoohSelector(t *testing.T) {
 		t.Errorf("large_client_header_buffers size %d is too small for a %d byte request line", size, requestLine)
 	}
 }
-
-// nginxBodySizePattern captures the operand of client_max_body_size in any form nginx
-// accepts: a bare byte count, or a k/K/m/M suffixed one.
-var nginxBodySizePattern = regexp.MustCompile(`client_max_body_size\s+(\d+)([kKmM]?)\s*;`)
-
-// nginxReadTimeoutPattern captures the operand of proxy_read_timeout. nginx reads a bare
-// number as seconds and accepts s/m/h suffixes; for a time operand `m` means minutes.
-var nginxReadTimeoutPattern = regexp.MustCompile(`proxy_read_timeout\s+(\d+)([smh]?)\s*;`)
 
 // TestNginxAllowsSoftDeletePut guards the two nginx defaults the soft delete crosses. The
 // soft delete sends the selected rows back as a PUT .../dooh-settings body, so the worst
@@ -954,48 +1035,27 @@ var nginxReadTimeoutPattern = regexp.MustCompile(`proxy_read_timeout\s+(\d+)([sm
 // report failure on a delete that committed.
 //
 // Both thresholds are floors, not exact matches, so an operator raising them later does
-// not fail the suite.
+// not fail the suite. The timeout is looked for inside `location /api/` only: elsewhere it
+// would not apply to a proxied request.
 func TestNginxAllowsSoftDeletePut(t *testing.T) {
-	path := filepath.Join("..", "frontend", "nginx.conf")
-	conf, err := os.ReadFile(path)
-	if err != nil {
-		// Keep `go test ./...` usable in a backend-only checkout.
-		t.Skipf("skipping: %s not readable: %v", path, err)
-	}
-	stripped := nginxCommentPattern.ReplaceAll(conf, nil)
+	conf := readNginxConf(t)
 
-	m := nginxBodySizePattern.FindSubmatch(stripped)
-	if m == nil {
+	size, ok := nginxOperand(t, nginxBodySizePattern, conf, byteSuffixes, true)
+	if !ok {
 		t.Fatal("frontend/nginx.conf: client_max_body_size not set; the default 1m rejects a 1000-row soft-delete PUT with 413")
-	}
-	size, err := strconv.Atoi(string(m[1]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	switch string(m[2]) {
-	case "k", "K":
-		size *= 1024
-	case "m", "M":
-		size *= 1024 * 1024
 	}
 	const minBodySize = 2 * 1024 * 1024
 	if size < minBodySize {
 		t.Errorf("client_max_body_size %d is too small for a 1000-row soft-delete PUT; want at least %d", size, minBodySize)
 	}
 
-	m = nginxReadTimeoutPattern.FindSubmatch(stripped)
-	if m == nil {
-		t.Fatal("frontend/nginx.conf: proxy_read_timeout not set; the default 60s can 504 on a 1000-row soft-delete PUT that commits upstream")
+	apiLocation := nginxAPILocationPattern.FindSubmatch(conf)
+	if apiLocation == nil {
+		t.Fatal("frontend/nginx.conf: no `location /api/` block found")
 	}
-	seconds, err := strconv.Atoi(string(m[1]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	switch string(m[2]) {
-	case "m":
-		seconds *= 60
-	case "h":
-		seconds *= 3600
+	seconds, ok := nginxOperand(t, nginxReadTimeoutPattern, apiLocation[1], timeSuffixes, false)
+	if !ok {
+		t.Fatal("frontend/nginx.conf: proxy_read_timeout not set in `location /api/`; the default 60s can 504 on a 1000-row soft-delete PUT that commits upstream")
 	}
 	const minTimeoutSeconds = 120
 	if seconds < minTimeoutSeconds {
@@ -1031,6 +1091,56 @@ func TestDeletePlacementDoohSettings_ForwardsLongSelector(t *testing.T) {
 	}
 	if gotQuery != "ids="+selector {
 		t.Errorf("upstream query truncated: got %d bytes, want %d", len(gotQuery), len("ids="+selector))
+	}
+}
+
+// TestPutPlacementDoohSettings_ProxiesUpstreamError pins the error path the soft delete's
+// whole UX rests on: the dialog names the offending screen by rewriting the indexed
+// property_name of the upstream body, so that body has to reach the browser byte for byte.
+func TestPutPlacementDoohSettings_ProxiesUpstreamError(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		errBody string
+	}{
+		{"indexed batch validation", http.StatusBadRequest, `{"type":"ValidationException","messages":[{"error_code":"placement.dooh.venue.type.tax.notfound","property_name":"dooh_settings[7].venue_type_tax","description":"Venue type tax not found"}]}`},
+		{"row not found", http.StatusBadRequest, `{"type":"ValidationException","messages":[{"error_code":"placement.dooh.unknown","property_name":"dooh_settings[0]","description":"DOOH setting not found with id 4711 for placement 101"}]}`},
+		{"forbidden", http.StatusForbidden, `{"type":"ForbiddenException","messages":[{"error_code":"access.denied","description":"Not allowed"}]}`},
+		{"empty body", http.StatusBadRequest, ``},
+		{"unknown placement", http.StatusNotFound, `{"type":"NotFoundException","messages":[{"error_code":"placement.unknown","property_name":"placementId","description":"Unknown placement"}]}`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					w.Write([]byte(tc.errBody))
+				},
+			})
+
+			app := appServer(t, upstream.URL)
+
+			req, _ := http.NewRequest(http.MethodPut, app.URL+"/api/publishers/42/placements/101/dooh-settings",
+				bytes.NewReader([]byte(`{"dooh_settings":[{"id":4711,"status":"deleted"}]}`)))
+			req.Header.Set("X-Access-Token", "mock-access-token")
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status: want %d, got %d", tc.status, resp.StatusCode)
+			}
+			got, _ := io.ReadAll(resp.Body)
+			if string(got) != tc.errBody {
+				t.Errorf("body: want %s, got %s", tc.errBody, got)
+			}
+		})
 	}
 }
 
