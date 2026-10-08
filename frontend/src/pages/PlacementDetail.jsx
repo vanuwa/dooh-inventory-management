@@ -13,6 +13,7 @@ import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
+import { fmtStreet } from '../utils/format.js'
 import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields } from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
@@ -34,7 +35,8 @@ const SCREEN_FIELDS = [
   ['Region',              'region',              true,  'text',   false],
   ['City',                'city',                true,  'text',   true],
   ['Zip',                 'zip',                 true,  'text',   false],
-  ['Address',             'address',             true,  'text',   false],
+  ['Street',              'street',              true,  'text',   false],
+  ['Street No.',          'street_number',       true,  'text',   false],
   ['Width (cm)',          'width',               true,  'number', false],
   ['Height (cm)',         'height',              true,  'number', false],
   ['Min Duration (s)',    'min_duration',        true,  'number', false],
@@ -80,7 +82,7 @@ function validationMessage(errors) {
   const parts = []
   if (Object.values(errors).some(reason => reason === true)) parts.push('Please fill in all required fields (marked with *).')
   const outOfRange = Object.keys(errors).filter(field => errors[field] === 'range')
-  if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±90, longitude within ±180, player id at most 255 characters, CPM not negative.`)
+  if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±90, longitude within ±180, player id at most 255 characters, street at most 1024 characters, street number at most 32 characters, CPM not negative.`)
   return parts.join(' ')
 }
 
@@ -353,7 +355,7 @@ export default function PlacementDetail() {
         total = data.total ?? all.length
         p++
       }
-      const cols = ['id', 'publisher_id', 'placement_id', 'player_id', 'status', 'device_id', 'screen_img_url', 'orientation', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax', 'lat', 'lon', 'country_code', 'region', 'city', 'zip', 'address', 'width', 'height', 'min_duration', 'max_duration', 'avg_weekly_audience', 'cpm', 'currency_code', 'allowed_content']
+      const cols = ['id', 'publisher_id', 'placement_id', 'player_id', 'status', 'device_id', 'screen_img_url', 'orientation', 'resolution_width', 'resolution_height', 'venue_type_id', 'venue_type_tax', 'lat', 'lon', 'country_code', 'region', 'city', 'zip', 'street', 'street_number', 'width', 'height', 'min_duration', 'max_duration', 'avg_weekly_audience', 'cpm', 'currency_code', 'allowed_content']
       const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
       const csv = [cols.join(','), ...all.map(row => cols.map(c => esc(row[c])).join(','))].join('\n')
       const now = new Date()
@@ -732,7 +734,7 @@ export default function PlacementDetail() {
                             <td style={s.td}>{fmt(sc.city)}</td>
                             <td style={s.td}>{fmt(sc.region)}</td>
                             <td style={s.td}>{fmt(sc.zip)}</td>
-                            <td style={s.td}>{fmt(sc.address)}</td>
+                            <td style={s.td}>{fmtStreet(sc.street, sc.street_number)}</td>
                             <td style={s.td}>{duration}</td>
                             <td style={s.td}>{cpm}</td>
                             <td style={s.td}>{audience}</td>
