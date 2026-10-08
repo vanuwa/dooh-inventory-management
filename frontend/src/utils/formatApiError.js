@@ -29,11 +29,10 @@ const INDEXED_PROPERTY = /^dooh_settings\[(\d+)\](?:\.(.+))?$/
 // untouched, which covers the hard-delete `ids` errors. An index with no matching row
 // degrades to the original property name rather than throwing.
 //
-// It rewrites *validator* errors only. Spring's own bean-validation path spells the
-// property `doohSettings[0].city` (camelCase, no underscore), which this pattern does not
-// match and could not name a screen from anyway — that rejection is an unhandled
-// MethodArgumentNotValidException, which is why `partitionSoftDeletable` blocks those rows
-// before they are ever sent.
+// It rewrites *validator* errors only. A bean-validation error (`@NotBlank`, `@Size`,
+// `@DecimalMin`, …) comes back as a 400 on the bare property name (`city`, `street`) with no
+// `dooh_settings[i]` index even in a multi-row batch, so there is no screen to name — which
+// is why `partitionSoftDeletable` blocks those rows before they are ever sent.
 export function labelBatchErrors(errData, sentScreens) {
   if (!Array.isArray(errData?.messages)) return errData
   return {

@@ -14,7 +14,7 @@ import {
   DELETED_STATUS,
 } from './screenStatus.js'
 
-// Modelled on a real PlacementDoohItem payload: the six nullable plain Go strings arrive
+// Modelled on a real PlacementDoohItem payload: the seven nullable plain Go strings arrive
 // as "" when upstream holds NULL, every nullable numeric arrives as null, and lat/lon/width
 // are genuine zeroes that must survive the filter.
 function fixtureScreen(overrides = {}) {
@@ -37,7 +37,8 @@ function fixtureScreen(overrides = {}) {
     region: '',
     city: 'Amsterdam',
     zip: '',
-    address: '',
+    street: '',
+    street_number: '',
     width: 0,
     height: null,
     min_duration: null,
@@ -134,7 +135,7 @@ describe('softDeleteBody', () => {
 
   it('drops the empty strings our proxy sends for NULL columns, and null pointers', () => {
     const [row] = softDeleteBody([fixtureScreen()]).dooh_settings
-    for (const key of ['device_id', 'screen_img_url', 'region', 'zip', 'address', 'currency_code']) {
+    for (const key of ['device_id', 'screen_img_url', 'region', 'zip', 'street', 'street_number', 'currency_code']) {
       expect(row).not.toHaveProperty(key)
     }
     expect(row).not.toHaveProperty('cpm')
@@ -159,6 +160,17 @@ describe('softDeleteBody', () => {
     // the rest of the row is untouched by the drop
     expect(rows[0].id).toBe(4711)
     expect(rows[0].player_id).toBe('test-player-042')
+  })
+
+  it('drops an empty street pair and keeps a legacy street that has no number', () => {
+    const [empty, legacy] = softDeleteBody([
+      fixtureScreen(),
+      fixtureScreen({ id: 4712, street: 'Damrak 1-5, 1012 LG Amsterdam' }),
+    ]).dooh_settings
+    expect(empty).not.toHaveProperty('street')
+    expect(empty).not.toHaveProperty('street_number')
+    expect(legacy.street).toBe('Damrak 1-5, 1012 LG Amsterdam')
+    expect(legacy).not.toHaveProperty('street_number')
   })
 
   it('keeps a set value in a field that is usually empty', () => {
@@ -228,7 +240,7 @@ describe('partitionSoftDeletable', () => {
     expect(blocked).toEqual([])
   })
 
-  it('blocks a whitespace-only required field, which @NotBlank rejects as a bare 500', () => {
+  it('blocks a whitespace-only required field, which @NotBlank rejects with an unattributable 400', () => {
     const bad = fixtureScreen({ id: 4713, allowed_content: '  ' })
     expect(partitionSoftDeletable([bad]).blocked).toEqual([{ row: bad, missing: ['allowed_content'] }])
   })
@@ -247,8 +259,8 @@ describe('partitionSoftDeletable', () => {
   })
 
   // The bean-validation bounds on PlacementDoohDto fail exactly like @NotNull/@NotBlank: at
-  // @Valid time, as a MethodArgumentNotValidException with no handler, i.e. a 500 naming no
-  // screen that takes the whole batch with it.
+  // @Valid time, as a 400 on the bare property name, naming no screen, that takes the whole
+  // batch with it.
   it('blocks a lat outside the WGS84 bounds, naming lat', () => {
     const tooHigh = fixtureScreen({ id: 4718, lat: 90.5 })
     const tooLow = fixtureScreen({ id: 4719, lat: -91 })
@@ -269,6 +281,13 @@ describe('partitionSoftDeletable', () => {
   it('blocks a negative cpm, which @DecimalMin("0.0") rejects', () => {
     const bad = fixtureScreen({ id: 4722, cpm: -0.01, currency_code: 'EUR' })
     expect(partitionSoftDeletable([bad]).blocked).toEqual([{ row: bad, missing: ['cpm'] }])
+  })
+
+  it('blocks a street or street_number longer than its @Size, naming the field', () => {
+    const longStreet = fixtureScreen({ id: 4725, street: 's'.repeat(1025) })
+    const longNumber = fixtureScreen({ id: 4726, street: 'Damrak', street_number: '1'.repeat(33) })
+    expect(partitionSoftDeletable([longStreet]).blocked).toEqual([{ row: longStreet, missing: ['street'] }])
+    expect(partitionSoftDeletable([longNumber]).blocked).toEqual([{ row: longNumber, missing: ['street_number'] }])
   })
 
   it('allows values at and inside the bounds — both @DecimalMin and @DecimalMax are inclusive', () => {
@@ -320,7 +339,7 @@ describe('missingCurrencyPair', () => {
   })
 })
 
-// Exported in its own right because the single-screen edit dialog runs it too: the same four
+// Exported in its own right because the single-screen edit dialog runs it too: the same six
 // bean-validation bounds fail the same unattributable way on a one-row PUT.
 describe('outOfRangeFields', () => {
   it('reports nothing for a row inside every bound', () => {
@@ -342,6 +361,20 @@ describe('outOfRangeFields', () => {
     expect(outOfRangeFields(fixtureScreen({ cpm: 0, currency_code: 'EUR' }))).toEqual([])
   })
 
+  it('reports a street longer than @Size(max = 1024) and a street_number longer than @Size(max = 32)', () => {
+    expect(outOfRangeFields(fixtureScreen({ street: 's'.repeat(1025) }))).toEqual(['street'])
+    expect(outOfRangeFields(fixtureScreen({ street_number: '1'.repeat(33) }))).toEqual(['street_number'])
+  })
+
+  it('accepts a street of exactly 1024 and a street_number of exactly 32 — @Size is inclusive', () => {
+    expect(outOfRangeFields(fixtureScreen({ street: 's'.repeat(1024), street_number: '1'.repeat(32) }))).toEqual([])
+  })
+
+  it('accepts an absent street and street_number — neither is required', () => {
+    expect(outOfRangeFields(fixtureScreen({ street: undefined, street_number: undefined }))).toEqual([])
+    expect(outOfRangeFields(fixtureScreen({ street: null, street_number: null }))).toEqual([])
+  })
+
   it('accepts the exact bounds — @DecimalMin and @DecimalMax are inclusive', () => {
     expect(outOfRangeFields(fixtureScreen({ lat: 90, lon: 180 }))).toEqual([])
     expect(outOfRangeFields(fixtureScreen({ lat: -90, lon: -180 }))).toEqual([])
@@ -353,8 +386,9 @@ describe('outOfRangeFields', () => {
   })
 
   it('reports every field it can, so the form can mark them all at once', () => {
-    expect(outOfRangeFields({ lat: 91, lon: 181, player_id: 'x'.repeat(256), cpm: -1 }))
-      .toEqual(['lat', 'lon', 'player_id', 'cpm'])
+    expect(outOfRangeFields({
+      lat: 91, lon: 181, player_id: 'x'.repeat(256), cpm: -1, street: 's'.repeat(1025), street_number: '1'.repeat(33),
+    })).toEqual(['lat', 'lon', 'player_id', 'cpm', 'street', 'street_number'])
   })
 
   it('ignores an absent or blank value — that is missingRequiredFields\' call', () => {

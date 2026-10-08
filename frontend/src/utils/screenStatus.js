@@ -15,10 +15,10 @@ export const DELETED_STATUS = 'deleted'
 
 // `null`, `undefined`, `''` and whitespace-only all count as blank. Trimmed, because five of
 // the ten required fields — player_id, venue_type_tax, country_code, city, allowed_content —
-// are `@NotBlank` upstream, which rejects `"   "` as well. That rejection arrives through
-// `@Valid`, as a MethodArgumentNotValidException that `ExceptionHandlerController` has no
-// handler for, i.e. a 500 naming no screen — exactly the unattributable failure the
-// pre-checks exist to prevent. `softDeleteBody`'s filter deliberately does NOT use this; see
+// are `@NotBlank` upstream, which rejects `"   "` as well. That rejection is bean validation:
+// a 400 reported on the bare property name, with no `dooh_settings[i]` index even in a
+// multi-row batch, so `labelBatchErrors` cannot tie it to a screen — exactly the
+// unattributable failure the pre-checks exist to prevent. `softDeleteBody`'s filter deliberately does NOT use this; see
 // the note at its call site.
 const isBlank = value => value == null || String(value).trim() === ''
 
@@ -118,31 +118,36 @@ export function missingCurrencyPair(screen) {
   return []
 }
 
-// `PlacementDoohDto` carries four bounds beside its `@NotNull`/`@NotBlank` set, and they fail the
+// `PlacementDoohDto` carries six bounds beside its `@NotNull`/`@NotBlank` set, and they fail the
 // same way: they are bean-validation constraints, so they run at `@Valid @RequestBody` time, before
-// the controller body, and raise a MethodArgumentNotValidException that `ExceptionHandlerController`
-// has no `@ExceptionHandler` for — a bare 500 naming no screen, killing the whole all-or-nothing
-// batch. The values are copied from `PlacementDoohDto` / `DoohScreenFields` (both @DecimalMin and
-// @DecimalMax are inclusive by default, so exactly ±90 / ±180 / 0.0 pass):
+// the controller body, and come back as a 400 reported on the bare property name (`lat`, `street`)
+// — bean-validation errors never carry the `dooh_settings[i]` index, even in a multi-row batch — so
+// `labelBatchErrors` cannot tie one to a screen, and it kills the whole all-or-nothing batch. The
+// values are copied from `PlacementDoohDto` / `DoohScreenFields` (both @DecimalMin and @DecimalMax
+// are inclusive by default, so exactly ±90 / ±180 / 0.0 pass; @Size is inclusive too):
 //
-//   lat        @DecimalMin("-90.0")  @DecimalMax("90.0")
-//   lon        @DecimalMin("-180.0") @DecimalMax("180.0")
-//   player_id  @Size(max = 255)
-//   cpm        @DecimalMin("0.0")
+//   lat            @DecimalMin("-90.0")  @DecimalMax("90.0")
+//   lon            @DecimalMin("-180.0") @DecimalMax("180.0")
+//   player_id      @Size(max = 255)
+//   cpm            @DecimalMin("0.0")
+//   street         @Size(max = MAX_STREET_LENGTH)         1024 (SSP-1134)
+//   street_number  @Size(max = MAX_STREET_NUMBER_LENGTH)  32   (SSP-1134)
 //
 // Rows that violate them are not hypothetical: `BulkUploadPlacementDoohDtoBase` carries no
 // bean-validation annotations at all, so an xlsx-written row predating SSP-1117's shared
 // `validateSharedRules` can hold an out-of-range coordinate, a negative cpm or an over-length
 // player_id. One such row takes the whole PUT down, so — like the currency pair — decide it here
-// from data already in hand rather than in an unattributable 500.
+// from data already in hand rather than in an unattributable 400.
 //
 // Only *present* values are tested: an absent lat/lon/player_id is `missingRequiredFields`'s call,
-// and an absent cpm is legal. A non-numeric value fails the bounds test and is reported here too —
+// and an absent cpm, street or street_number is legal. A non-numeric value fails the bounds test and is reported here too —
 // the Go proxy types all three as numbers, so it cannot occur, and upstream's Jackson would reject
 // it just as flatly.
 const MAX_PLAYER_ID_LENGTH = 255
 const LAT_BOUNDS = [-90, 90]
 const LON_BOUNDS = [-180, 180]
+const MAX_STREET_LENGTH = 1024
+const MAX_STREET_NUMBER_LENGTH = 32
 
 export function outOfRangeFields(screen) {
   const outOfRange = []
@@ -151,6 +156,8 @@ export function outOfRangeFields(screen) {
   if (!isBlank(screen?.lon) && !inBounds(screen.lon, LON_BOUNDS)) outOfRange.push('lon')
   if (String(screen?.player_id ?? '').length > MAX_PLAYER_ID_LENGTH) outOfRange.push('player_id')
   if (!isBlank(screen?.cpm) && Number(screen.cpm) < 0) outOfRange.push('cpm')
+  if (String(screen?.street ?? '').length > MAX_STREET_LENGTH) outOfRange.push('street')
+  if (String(screen?.street_number ?? '').length > MAX_STREET_NUMBER_LENGTH) outOfRange.push('street_number')
   return outOfRange
 }
 
@@ -192,11 +199,11 @@ export const PATH_OWNED_KEYS = ['publisher_id', 'placement_id']
 // and for the same reason: upstream's PUT is a full overwrite — `applyScreenFields` writes
 // every column it is handed unconditionally (and `updateAll` writes `player_id` and
 // `device_id` beside it), so an absent key becomes NULL while an empty-string key becomes
-// ''. Six *nullable* string columns — device_id, screen_img_url, region, zip, address,
-// currency_code — are plain non-omitempty Go strings in `PlacementDoohItem`, so an upstream
-// NULL already reaches us as "". (Seven other strings are non-omitempty too; those six are
-// the ones that are nullable upstream, which is what makes them lossy.) Copying a row whole
-// would therefore rewrite up to six NULL columns as '' on every soft delete, across up to
+// ''. Seven *nullable* string columns — device_id, screen_img_url, region, zip, street,
+// street_number, currency_code — are plain non-omitempty Go strings in `PlacementDoohItem`, so
+// an upstream NULL already reaches us as "". (Seven other strings are non-omitempty too; those
+// seven are the ones that are nullable upstream, which is what makes them lossy.) Copying a row
+// whole would therefore rewrite up to seven NULL columns as '' on every soft delete, across up to
 // 1000 rows, each landing in that row's UPDATE history diff. Dropping empty keys is the
 // round-trip-faithful option.
 //
