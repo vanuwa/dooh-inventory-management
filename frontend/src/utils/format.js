@@ -1,9 +1,21 @@
 // Shared display formatters for screen/publisher data.
 
-// "Name (id)" when a name is present, otherwise the bare id; dash when unknown.
-export function fmtPublisher(id, name) {
-  if (id == null) return '—'
+const isBlank = v => v == null || v === ''
+
+// "Name (id)" when a name is present, otherwise the bare id; dash when the id is unknown,
+// since a name alone cannot be looked up. Used for publisher, placement and country.
+export function fmtNamedId(id, name) {
+  if (isBlank(id)) return '—'
   return name ? `${name} (${id})` : String(id)
+}
+
+export const fmtPublisher = fmtNamedId
+
+// The name alone, falling back to the id, then a dash — for venue type and taxonomy,
+// where the name is what an operator reads and the id adds little.
+export function fmtNameOrId(name, id) {
+  if (!isBlank(name)) return String(name)
+  return isBlank(id) ? '—' : String(id)
 }
 
 // "street number" with blank parts dropped; dash when both are blank. Legacy (pre-SSP-1134) rows

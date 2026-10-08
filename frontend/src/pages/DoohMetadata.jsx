@@ -5,7 +5,8 @@ import Layout from '../components/Layout.jsx'
 import { tableStyles as ts } from '../styles/tables.js'
 import { tabStyles } from '../styles/tabs.js'
 import { useDebounce } from '../hooks/useDebounce.js'
-import { fmtPublisher } from '../utils/format.js'
+import { fmtNamedId, fmtNameOrId, fmtPublisher, fmtStreet } from '../utils/format.js'
+import ScreenStatusBadge from '../components/ScreenStatusBadge.jsx'
 import { MAP_PROVIDER_IDS, DEFAULT_MAP_PROVIDER, GOOGLE_MAPS_AVAILABLE } from '../constants/mapConfig.js'
 
 // Lazy-loaded so the map libraries stay out of the initial bundle and only
@@ -200,11 +201,14 @@ export default function DoohMetadata() {
               <thead>
                 <tr>
                   <th style={ts.thCompact}>Screen ID</th>
+                  <th style={ts.thCompact}>Status</th>
                   <th style={ts.thCompact}>Publisher</th>
+                  <th style={ts.thCompact}>Placement</th>
                   <th style={ts.thCompact}>Country</th>
                   <th style={ts.thCompact}>City</th>
                   <th style={ts.thCompact}>Region</th>
                   <th style={ts.thCompact}>ZIP</th>
+                  <th style={ts.thCompact}>Address</th>
                   <th style={ts.thCompact}>Venue Type</th>
                   <th style={ts.thCompact}>Location</th>
                   <th style={ts.thCompact}>Size (px)</th>
@@ -214,7 +218,7 @@ export default function DoohMetadata() {
                   <th style={ts.thCompact}>Est. Impr/wk</th>
                   <th style={ts.thCompact}>Multiplier Vendor</th>
                   <th style={ts.thCompact}>Multiplier Src</th>
-                  <th style={ts.thCompact}>Venue Tax ID</th>
+                  <th style={ts.thCompact}>Venue Taxonomy</th>
                   <th style={ts.thCompact}>Allowed Content</th>
                   <th style={ts.thCompact}>Multipliers</th>
                   <th style={ts.thCompact}>Screen Image</th>
@@ -222,14 +226,18 @@ export default function DoohMetadata() {
               </thead>
               <tbody>
                 {items.map((item, i) => (
-                  <tr key={item.screen_id || `idx-${i}`} style={i % 2 !== 0 ? ts.rowAlt : undefined}>
+                  // `id` is the row's own key; `screen_id` is only unique within a placement.
+                  <tr key={item.id ?? `idx-${i}`} style={i % 2 !== 0 ? ts.rowAlt : undefined}>
                     <td style={ts.tdCompact}>{fmt(item.screen_id)}</td>
+                    <td style={ts.tdCompact}><ScreenStatusBadge status={item.status} /></td>
                     <td style={ts.tdCompact}>{fmtPublisher(item.publisher_id, item.publisher_name)}</td>
-                    <td style={ts.tdCompact}>{fmt(item.country_code)}</td>
+                    <td style={ts.tdCompact}>{fmtNamedId(item.placement_id, item.placement_name)}</td>
+                    <td style={ts.tdCompact}>{fmtNamedId(item.country_code, item.country_name)}</td>
                     <td style={ts.tdCompact}>{fmt(item.city)}</td>
                     <td style={ts.tdCompact}>{fmt(item.region)}</td>
                     <td style={ts.tdCompact}>{fmt(item.zip)}</td>
-                    <td style={ts.tdCompact}>{fmt(item.venue_type_id)}</td>
+                    <td style={ts.tdCompact}>{fmtStreet(item.street, item.street_number)}</td>
+                    <td style={ts.tdCompact}>{fmtNameOrId(item.venue_type_name, item.venue_type_id)}</td>
                     <td style={ts.tdCompact}>{fmtLocation(item.lat, item.lon)}</td>
                     <td style={ts.tdCompact}>{fmtSize(item.width, item.height)}</td>
                     <td style={ts.tdCompact}>{fmtSize(item.resolution_width, item.resolution_height)}</td>
@@ -238,7 +246,7 @@ export default function DoohMetadata() {
                     <td style={ts.tdCompact}>{fmtImpressions(item.estimated_weekly_impressions)}</td>
                     <td style={ts.tdCompact}>{fmt(item.multiplier_vendor)}</td>
                     <td style={ts.tdCompact}>{fmt(item.multiplier_source_type_id)}</td>
-                    <td style={ts.tdCompact}>{fmt(item.venue_type_tax_id)}</td>
+                    <td style={ts.tdCompact}>{fmtNameOrId(item.venue_type_tax_name, item.venue_type_tax_id)}</td>
                     <td style={ts.tdCompact}>{fmtAllowedContent(item.allowed_content)}</td>
                     <td style={ts.tdCompact}>{fmtMultipliers(item.dooh_multipliers)}</td>
                     <td style={ts.tdCompact}>

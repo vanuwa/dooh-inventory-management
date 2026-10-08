@@ -60,7 +60,7 @@ export default function LeafletScreenMap({ markers, loadId, height }) {
       <ResizeHandler trigger={height} />
       <MarkerClusterGroup key={loadId} chunkedLoading>
         {markers.map((m, i) => (
-          <Marker key={m.screen_id || `idx-${i}`} position={[m.lat, m.lon]}>
+          <Marker key={m.id ?? `idx-${i}`} position={[m.lat, m.lon]}>
             <Popup>
               <ScreenPopupContent screen={m} />
             </Popup>
