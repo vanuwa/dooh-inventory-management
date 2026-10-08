@@ -9,50 +9,17 @@ import (
 	"dooh-backend/config"
 )
 
-type doohMultiplierDto struct {
-	Day        string  `json:"day"`
-	StartHour  int     `json:"start_hour"`
-	EndHour    int     `json:"end_hour"`
-	Multiplier float64 `json:"multiplier"`
-}
-
-type doohMetadataItem struct {
-	ScreenID                   string              `json:"screen_id"`
-	VenueTypeID                *int32              `json:"venue_type_id"`
-	Lat                        *float64            `json:"lat"`
-	Lon                        *float64            `json:"lon"`
-	Region                     *string             `json:"region"`
-	CountryCode                string              `json:"country_code"`
-	City                       string              `json:"city"`
-	Zip                        *string             `json:"zip"`
-	Width                      *int32              `json:"width"`
-	Height                     *int32              `json:"height"`
-	ResolutionWidth            int32               `json:"resolution_width"`
-	ResolutionHeight           int32               `json:"resolution_height"`
-	MinDuration                *int32              `json:"min_duration"`
-	MaxDuration                *int32              `json:"max_duration"`
-	MultiplierSourceTypeID     *int64              `json:"multiplier_source_type_id"`
-	MultiplierVendor           *string             `json:"multiplier_vendor"`
-	VenueTypeTaxID             *int64              `json:"venue_type_tax_id"`
-	PublisherID                *int64              `json:"publisher_id"`
-	PublisherName              *string             `json:"publisher_name"`
-	DoohMultipliers            []doohMultiplierDto `json:"dooh_multipliers"`
-	AllowedContent             []string            `json:"allowed_content"`
-	EstimatedWeeklyImpressions *float64            `json:"estimated_weekly_impressions"`
-	CurrencyCode               *string             `json:"currency_code"`
-	CPM                        *float64            `json:"cpm"`
-	ScreenImageURL             *string             `json:"screen_image_url"`
-}
-
+// Items are passed through raw: the handler never reads an item field, it only trims the
+// limit+1 sentinel, so a typed struct would add nothing but drop every field it does not name.
 type doohMetadataListWrapper struct {
-	Items []doohMetadataItem `json:"dooh_metadata_list"`
+	Items []json.RawMessage `json:"dooh_metadata_list"`
 }
 
 type doohMetadataResponse struct {
-	Items   []doohMetadataItem `json:"items"`
-	Page    int                `json:"page"`
-	Limit   int                `json:"limit"`
-	HasMore bool               `json:"has_more"`
+	Items   []json.RawMessage `json:"items"`
+	Page    int               `json:"page"`
+	Limit   int               `json:"limit"`
+	HasMore bool              `json:"has_more"`
 }
 
 type DoohMetadataHandler struct {
@@ -72,8 +39,9 @@ func (h *DoohMetadataHandler) DoohMetadata(w http.ResponseWriter, r *http.Reques
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
 		limit = n
 	}
-	if limit > 10000 {
-		limit = 10000
+	// Upstream caps limit at 10000 and we ask for limit+1 below, so 9999 keeps the sentinel within it.
+	if limit > 9999 {
+		limit = 9999
 	}
 	offset := (page - 1) * limit
 
@@ -91,18 +59,20 @@ func (h *DoohMetadataHandler) DoohMetadata(w http.ResponseWriter, r *http.Reques
 	// a false positive when the dataset size is an exact multiple of limit.
 	params.Set("limit", strconv.Itoa(limit+1))
 
+	// Our query contract (country, publisherId) is translated here: upstream takes only the
+	// snake_case names and silently ignores any other parameter, so a wrong name filters nothing.
 	if country := r.URL.Query().Get("country"); country != "" {
-		params.Set("country", country)
+		params.Set("country_code", country)
 	}
 	if publisherID := r.URL.Query().Get("publisherId"); publisherID != "" {
-		params.Set("publisherId", publisherID)
+		params.Set("publisher_id", publisherID)
 	}
 	if sort := r.URL.Query().Get("sort"); sort != "" {
 		params.Set("sort", sort)
 	}
 
 	// Fix #2: capture upHeaders so we can forward the upstream body on non-200.
-	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, "/admin/v1/dooh-metadata?"+params.Encode(), accessToken, nil, "")
+	body, status, upHeaders, err := doRequest(upstreamBaseURL(h.cfg, r), http.MethodGet, "/demand-partner/v1/dooh-metadata?"+params.Encode(), accessToken, nil, "")
 	if err != nil {
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
@@ -125,7 +95,7 @@ func (h *DoohMetadataHandler) DoohMetadata(w http.ResponseWriter, r *http.Reques
 		items = items[:limit]
 	}
 	if items == nil {
-		items = []doohMetadataItem{}
+		items = []json.RawMessage{}
 	}
 
 	writeJSON(w, doohMetadataResponse{

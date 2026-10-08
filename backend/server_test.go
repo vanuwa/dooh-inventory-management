@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -3055,5 +3056,251 @@ func TestProxyDoohSettings_ForwardsBodyAtTheCap(t *testing.T) {
 	}
 	if got != handlers.DoohSettingsMaxBody {
 		t.Errorf("forwarded body: want %d bytes, got %d", handlers.DoohSettingsMaxBody, got)
+	}
+}
+
+// --- DOOH metadata ---
+
+const doohMetadataUpstreamPath = "/demand-partner/v1/dooh-metadata"
+
+// getDoohMetadata calls the proxy's metadata route with the given query string.
+func getDoohMetadata(t *testing.T, appURL, query string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, appURL+"/api/dooh-metadata"+query, nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// doohMetadataItems builds an upstream list body holding n minimal items.
+func doohMetadataItems(n int) string {
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"id":%d,"screen_id":"s-%d"}`, i+1, i+1)
+	}
+	return `{"dooh_metadata_list":[` + strings.Join(items, ",") + `]}`
+}
+
+// TestDoohMetadata_ForwardsSnakeCaseFilters pins the translation of our own query contract
+// (country, publisherId) to the demand-partners names. Upstream silently ignores any other
+// parameter, so a camelCase key reaching it would not fail — it would just stop filtering.
+func TestDoohMetadata_ForwardsSnakeCaseFilters(t *testing.T) {
+	var got url.Values
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		doohMetadataUpstreamPath: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != doohMetadataUpstreamPath {
+				t.Errorf("path: want %q, got %q", doohMetadataUpstreamPath, r.URL.Path)
+			}
+			got = r.URL.Query()
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(doohMetadataItems(0)))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+	resp := getDoohMetadata(t, app.URL, "?page=3&limit=50&country=NL&publisherId=42&sort=screen_id")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	want := url.Values{
+		"offset":       {"100"},
+		"limit":        {"51"},
+		"country_code": {"NL"},
+		"publisher_id": {"42"},
+		"sort":         {"screen_id"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("upstream query: want %v, got %v", want, got)
+	}
+	for _, key := range []string{"country", "publisherId", "countryCode", "page"} {
+		if _, ok := got[key]; ok {
+			t.Errorf("%s: must not be forwarded upstream", key)
+		}
+	}
+}
+
+// TestDoohMetadata_LimitStaysWithinUpstreamCap guards the has-more sentinel at the largest page
+// size: upstream clamps limit to 10000, so asking for 10001 would silently drop the sentinel and
+// has_more could never be true.
+func TestDoohMetadata_LimitStaysWithinUpstreamCap(t *testing.T) {
+	var gotLimit string
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		doohMetadataUpstreamPath: func(w http.ResponseWriter, r *http.Request) {
+			gotLimit = r.URL.Query().Get("limit")
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(doohMetadataItems(0)))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+	resp := getDoohMetadata(t, app.URL, "?limit=10000")
+
+	if gotLimit != "10000" {
+		t.Errorf("upstream limit: want 10000, got %s", gotLimit)
+	}
+	var body struct {
+		Limit int `json:"limit"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Limit != 9999 {
+		t.Errorf("limit: want 9999, got %d", body.Limit)
+	}
+}
+
+// TestDoohMetadata_PassesItemsThroughVerbatim pins the pass-through: fields the proxy has never
+// heard of reach the client unchanged, and absent fields stay absent rather than gaining a zero.
+func TestDoohMetadata_PassesItemsThroughVerbatim(t *testing.T) {
+	const item = `{"id":7,"screen_id":"s-7","placement_id":101,"placement_name":"Lobby","street":"Damrak","street_number":"12a","status":"active","venue_type_name":"Airport","future_field":{"nested":[1,2]}}`
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		doohMetadataUpstreamPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"dooh_metadata_list":[` + item + `]}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+	resp := getDoohMetadata(t, app.URL, "")
+
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	if err := json.Unmarshal([]byte(item), &want); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 1 || !reflect.DeepEqual(body.Items[0], want) {
+		t.Errorf("items: want [%v], got %v", want, body.Items)
+	}
+}
+
+func TestDoohMetadata_HasMore(t *testing.T) {
+	tests := []struct {
+		name      string
+		upstreamN int
+		wantItems int
+		wantMore  bool
+	}{
+		{"sentinel present", 21, 20, true},
+		{"exactly one page", 20, 20, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				doohMetadataUpstreamPath: func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(doohMetadataItems(tc.upstreamN)))
+				},
+			})
+
+			app := appServer(t, upstream.URL)
+			resp := getDoohMetadata(t, app.URL, "?limit=20")
+
+			var body struct {
+				Items   []json.RawMessage `json:"items"`
+				HasMore bool              `json:"has_more"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Items) != tc.wantItems {
+				t.Errorf("items: want %d, got %d", tc.wantItems, len(body.Items))
+			}
+			if body.HasMore != tc.wantMore {
+				t.Errorf("has_more: want %v, got %v", tc.wantMore, body.HasMore)
+			}
+		})
+	}
+}
+
+// TestDoohMetadata_EmptyListIsAnArray: the frontend maps over items, so an empty result must
+// serialise as [] rather than null, whether upstream sent an empty list or no list at all.
+func TestDoohMetadata_EmptyListIsAnArray(t *testing.T) {
+	for _, upstreamBody := range []string{`{"dooh_metadata_list":[]}`, `{}`} {
+		t.Run(upstreamBody, func(t *testing.T) {
+			upstream := mockUpstream(t, map[string]http.HandlerFunc{
+				doohMetadataUpstreamPath: func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(upstreamBody))
+				},
+			})
+
+			app := appServer(t, upstream.URL)
+			resp := getDoohMetadata(t, app.URL, "")
+
+			raw, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(raw), `"items":[]`) {
+				t.Errorf("body: want \"items\":[], got %s", raw)
+			}
+		})
+	}
+}
+
+func TestDoohMetadata_RejectsNonIntegerPublisherID(t *testing.T) {
+	called := false
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		doohMetadataUpstreamPath: func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.Write([]byte(doohMetadataItems(0)))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+	for _, raw := range []string{"abc", "1,2", "4.2"} {
+		resp := getDoohMetadata(t, app.URL, "?publisherId="+url.QueryEscape(raw))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("publisherId=%s: want 400, got %d", raw, resp.StatusCode)
+		}
+	}
+	if called {
+		t.Error("upstream must not be called for an invalid publisherId")
+	}
+}
+
+func TestDoohMetadata_ProxiesUpstreamError(t *testing.T) {
+	const errBody = `{"type":"ValidationException","messages":[{"error_code":"invalid.sort","property_name":"sort","description":"Unknown sort field"}]}`
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		doohMetadataUpstreamPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(errBody))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+	resp := getDoohMetadata(t, app.URL, "?sort=nope")
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: want 400, got %d", resp.StatusCode)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	if string(got) != errBody {
+		t.Errorf("body: want %s, got %s", errBody, got)
+	}
+}
+
+func TestDoohMetadata_UnparseableUpstreamBody(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		doohMetadataUpstreamPath: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`not json`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+	resp := getDoohMetadata(t, app.URL, "")
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status: want 500, got %d", resp.StatusCode)
 	}
 }
