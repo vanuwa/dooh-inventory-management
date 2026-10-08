@@ -14,7 +14,7 @@ import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
 import { fmtStreet } from '../utils/format.js'
-import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields } from '../utils/screenStatus.js'
+import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields, missingCurrencyPair } from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -42,14 +42,19 @@ const SCREEN_FIELDS = [
   ['Min Duration (s)',    'min_duration',        true,  'number', false],
   ['Max Duration (s)',    'max_duration',        true,  'number', false],
   ['Avg Weekly Audience', 'avg_weekly_audience', true,  'number', false],
-  ['CPM',                 'cpm',                 true,  'number', false],
-  ['Currency Code',       'currency_code',       true,  'text',   false],
+  ['CPM',                 'cpm',                 true,  'number', false, 'cpm'],
+  ['Currency Code',       'currency_code',       true,  'text',   false, 'currencyCode'],
   ['Allowed Content',     'allowed_content',     true,  'text',   true],
 ]
 
 const REQUIRED_FIELDS = new Set(
   SCREEN_FIELDS.filter(([,,,, req]) => req).map(([, key]) => key)
 )
+
+// SSP-1133: upstream stores cpm 1 / USD when a write carries neither half of the pair
+const PRICE_PAIR_HELP = {
+  text: 'Set both or neither — leaving both empty stores 1 USD.',
+}
 
 const FIELD_HELP = {
   venueTypeId: {
@@ -60,6 +65,10 @@ const FIELD_HELP = {
   countryCode: {
     text: 'Country code using ISO 3166-1 alpha-2 standard (e.g., US, FR, CN).',
   },
+  // two keys for one text, because `helpOpen` is keyed by help key and a shared key would open
+  // both popovers at once
+  cpm: PRICE_PAIR_HELP,
+  currencyCode: PRICE_PAIR_HELP,
 }
 
 const FIELD_OPTIONS = {
@@ -76,13 +85,15 @@ function optionsFor(field, createMode) {
   return FIELD_OPTIONS[field]
 }
 
-// Missing required fields and out-of-range ones are both reported as red inputs, but they read
-// differently to a user, so the message names which happened.
+// Missing required fields, out-of-range ones and a half-set price pair are all reported as red
+// inputs, but they read differently to a user, so the message names which happened. The pair gets
+// its own sentence because neither CPM nor Currency Code is asterisked.
 function validationMessage(errors) {
   const parts = []
   if (Object.values(errors).some(reason => reason === true)) parts.push('Please fill in all required fields (marked with *).')
   const outOfRange = Object.keys(errors).filter(field => errors[field] === 'range')
   if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±90, longitude within ±180, player id at most 255 characters, street at most 1024 characters, street number at most 32 characters, CPM not negative.`)
+  if (Object.values(errors).includes('pair')) parts.push('CPM and Currency Code must be set together, or both left empty (stores 1 USD).')
   return parts.join(' ')
 }
 
@@ -219,7 +230,9 @@ export default function PlacementDetail() {
           allowed_content: 'VIDEO',
           resolution_width: 1920,
           resolution_height: 1080,
-          currency_code: 'EUR',
+          // upstream's own SSP-1133 default, shown so the user sees the price the screen gets
+          cpm: 1,
+          currency_code: 'USD',
         })
         setValidationErrors({})
         setSaveError('')
@@ -409,12 +422,16 @@ export default function PlacementDetail() {
 
   // Trimmed, not a bare `=== ''`: player_id, venue_type_tax, country_code, city and
   // allowed_content are `@NotBlank` upstream, so a whitespace-only value is rejected by
-  // `@Valid` — a MethodArgumentNotValidException with no handler upstream, i.e. a bare 500.
+  // `@Valid` — a 400 reported on the bare property name, naming no screen.
   //
   // `outOfRangeFields` is the same rule set the bulk soft delete pre-checks, and for the same
-  // reason: lat/lon/player_id/cpm carry bean-validation bounds that fail that identical
-  // unattributable way, so this form decides them from data already in hand rather than
-  // sending a value that comes back as a 500 naming no field.
+  // reason: lat/lon/player_id/street/street_number/cpm carry bean-validation bounds that fail that
+  // identical unattributable way, so this form decides them from data already in hand rather than
+  // sending a value that comes back as a 400 naming no screen.
+  //
+  // `missingCurrencyPair` marks the blank half of a half-set CPM / Currency Code pair, which
+  // upstream rejects (`placement.dooh.cpm.required` / `placement.dooh.cpm.currency.required`);
+  // both blank is valid and stores 1 USD (SSP-1133).
   function validateFields(values) {
     const errors = {}
     for (const field of REQUIRED_FIELDS) {
@@ -422,6 +439,7 @@ export default function PlacementDetail() {
       if (v == null || String(v).trim() === '') errors[field] = true
     }
     for (const field of outOfRangeFields(values)) errors[field] = 'range'
+    for (const field of missingCurrencyPair(values)) errors[field] = 'pair'
     return errors
   }
 
@@ -498,6 +516,9 @@ export default function PlacementDetail() {
       setSelected(prev => prev.has(updated.id) ? new Map(prev).set(updated.id, updated) : prev)
       setSelectedScreen(updated)
       setEditMode(false)
+      // refetch, since upstream may have stored a price these submitted values do not show:
+      // clearing both CPM and currency stores 1 USD (SSP-1133)
+      setScreensTick(t => t + 1)
     } catch (err) {
       if (err.message !== 'Unauthorized') setSaveError('Save failed.')
     } finally {
