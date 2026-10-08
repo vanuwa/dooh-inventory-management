@@ -93,10 +93,15 @@ type publisherPlacementsResponse struct {
 //     precisely why utils/screenStatus.js drops them via PATH_OWNED_KEYS: "publisher_id": 0 is
 //     neither null nor "", it would survive the drop-empty filter, and upstream compares any
 //     non-null value against the path's owner and kills the whole all-or-nothing batch.
-//   - device_id, screen_img_url, region, zip, address, currency_code (and status) are plain
-//     non-omitempty strings, so an upstream NULL arrives as "". That is why softDeleteBody's
-//     drop-empty-string rule exists: without it a soft delete would rewrite those NULL columns
-//     as empty strings on every selected row.
+//   - device_id, screen_img_url, region, zip, street, street_number, currency_code (and status)
+//     are plain non-omitempty strings, so an upstream NULL arrives as "". That is why
+//     softDeleteBody's drop-empty-string rule exists: without it a soft delete would rewrite
+//     those NULL columns as empty strings on every selected row.
+//
+// street / street_number (SSP-1134) replaced the old free-form address, which upstream no longer
+// returns and rejects with a 400 when sent non-blank. Every field missing here is dropped from
+// every screen GET, and the soft delete and Save are full-replace PUTs built from those rows, so
+// a missing street field would silently wipe that column on every touched screen.
 //
 // Changing either group to pointers would break both compensations at once.
 type PlacementDoohItem struct {
@@ -118,7 +123,8 @@ type PlacementDoohItem struct {
 	Region            string   `json:"region"`
 	City              string   `json:"city"`
 	Zip               string   `json:"zip"`
-	Address           string   `json:"address"`
+	Street            string   `json:"street"`
+	StreetNumber      string   `json:"street_number"`
 	Width             *int32   `json:"width"`
 	Height            *int32   `json:"height"`
 	MinDuration       *int32   `json:"min_duration"`

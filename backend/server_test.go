@@ -637,6 +637,103 @@ func TestPlacementDoohSettings_PreservesNullColumns(t *testing.T) {
 	}
 }
 
+// getDoohSettingRow fetches path through the proxy and returns the single screen row it
+// carries, from either the list ("dooh_settings") or the item ("dooh_setting") envelope.
+func getDoohSettingRow(t *testing.T, appURL, path string) map[string]any {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, appURL+path, nil)
+	req.Header.Set("X-Access-Token", "mock-access-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		DoohSettings []map[string]any `json:"dooh_settings"`
+		DoohSetting  map[string]any   `json:"dooh_setting"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.DoohSetting != nil {
+		return body.DoohSetting
+	}
+	if len(body.DoohSettings) != 1 {
+		t.Fatalf("dooh_settings: want 1, got %d", len(body.DoohSettings))
+	}
+	return body.DoohSettings[0]
+}
+
+// TestPlacementDoohSettings_CarriesStreetFields pins SSP-1134: street / street_number replaced
+// address, and both the list and the item GET must carry them. The soft delete and the
+// single-screen Save are full-replace PUTs built from these rows, so a field the proxy drops
+// here is a field those writes silently wipe upstream.
+func TestPlacementDoohSettings_CarriesStreetFields(t *testing.T) {
+	const row = `{"id":4711,"player_id":"p-1","status":"active","street":"Damrak","street_number":"12a"}`
+
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"dooh_settings":[` + row + `],"totalNumberOfElemements":1}`))
+		},
+		"/publisher/v1/placements/101/dooh-settings/4711": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(row))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	for _, path := range []string{
+		"/api/publishers/42/placements/101/dooh-settings",
+		"/api/publishers/42/placements/101/dooh-settings/4711",
+	} {
+		t.Run(path, func(t *testing.T) {
+			got := getDoohSettingRow(t, app.URL, path)
+			if got["street"] != "Damrak" {
+				t.Errorf("street: want %q, got %v", "Damrak", got["street"])
+			}
+			if got["street_number"] != "12a" {
+				t.Errorf("street_number: want %q, got %v", "12a", got["street_number"])
+			}
+			if _, present := got["address"]; present {
+				t.Errorf("address: want no key, got %v", got["address"])
+			}
+		})
+	}
+}
+
+// TestPlacementDoohSettings_AbsentStreetIsEmptyString pins the contract softDeleteBody relies
+// on: a row with no street from upstream comes back as "" (not null, not absent), which the
+// drop-empty-string rule then removes so the PUT sends no key and the NULL round-trips.
+func TestPlacementDoohSettings_AbsentStreetIsEmptyString(t *testing.T) {
+	upstream := mockUpstream(t, map[string]http.HandlerFunc{
+		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"dooh_settings":[{"id":4711,"player_id":"p-1","status":"active","street":null}],"totalNumberOfElemements":1}`))
+		},
+	})
+
+	app := appServer(t, upstream.URL)
+
+	got := getDoohSettingRow(t, app.URL, "/api/publishers/42/placements/101/dooh-settings")
+	for _, key := range []string{"street", "street_number"} {
+		value, present := got[key]
+		if !present {
+			t.Errorf("%s: key missing from the proxied row", key)
+			continue
+		}
+		if value != "" {
+			t.Errorf("%s: want \"\", got %v", key, value)
+		}
+	}
+}
+
 func TestPlacementDoohSettings_SearchPassthrough(t *testing.T) {
 	upstream := mockUpstream(t, map[string]http.HandlerFunc{
 		"/publisher/v1/placements/101/dooh-settings": func(w http.ResponseWriter, r *http.Request) {
