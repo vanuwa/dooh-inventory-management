@@ -133,7 +133,7 @@ Every route accepts the optional `X-Api-Env` header (`production` | `acceptance`
 - **Copy VAST Tag:** built client-side as `https://ad.360yield.com/{publisher_id}/advast?p={placement_id}&player_id=...&dooh_multiplier=1`; disabled when the screen has no `player_id`. The host is the ad server, not the API, and stays **production-only** by decision — on acceptance the copied tag points at the production ad server while carrying acceptance IDs. Switching it would mean adding an `adHost` field to `API_ENVIRONMENTS`.
 - **Upstream API typo:** The SSP API returns `totalNumberOfElemements` (missing an 's'). `resolveTotal` in `handlers/` handles both spellings and falls back to the `X-360-Content-Range` header.
 - **Pagination defaults:** 20 items per page, max 100. Offset = `(page - 1) * limit`.
-- **Plans:** `plans/` holds dated implementation plans for past features — useful context for why things are shaped the way they are.
+- **Plans:** `docs/plans/` holds dated implementation plans (finished ones under `docs/plans/completed/`) — useful context for why things are shaped the way they are.
 
 ---
 
