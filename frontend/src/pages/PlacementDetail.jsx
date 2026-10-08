@@ -15,7 +15,7 @@ import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
 import { fmtStreet, isBlank } from '../utils/format.js'
 import {
-  SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields, missingCurrencyPair, nonPositiveCpm,
+  SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields, nonPositiveCpm,
   MAX_PLAYER_ID_LENGTH, LAT_BOUNDS, LON_BOUNDS, MAX_STREET_LENGTH, MAX_STREET_NUMBER_LENGTH,
 } from '../utils/screenStatus.js'
 
@@ -45,8 +45,8 @@ const SCREEN_FIELDS = [
   ['Min Duration (s)',    'min_duration',        true,  'number', false],
   ['Max Duration (s)',    'max_duration',        true,  'number', false],
   ['Avg Weekly Audience', 'avg_weekly_audience', true,  'number', false],
-  ['CPM',                 'cpm',                 true,  'number', false, 'pricePair'],
-  ['Currency Code',       'currency_code',       true,  'text',   false, 'pricePair'],
+  ['CPM',                 'cpm',                 true,  'number', true,  'pricePair'],
+  ['Currency Code',       'currency_code',       true,  'text',   true,  'pricePair'],
   ['Allowed Content',     'allowed_content',     true,  'text',   true],
 ]
 
@@ -63,9 +63,10 @@ const FIELD_HELP = {
   countryCode: {
     text: 'Country code using ISO 3166-1 alpha-2 standard (e.g., US, FR, CN).',
   },
-  // SSP-1133: upstream stores cpm 1 / USD when a write carries neither half of the pair
+  // required here even though upstream accepts neither half and stores 1 USD (SSP-1133): the
+  // form always sends an explicit price rather than relying on that default
   pricePair: {
-    text: 'Set both or neither — leaving both empty stores 1 USD.',
+    text: 'Floor price per thousand impressions and its ISO 4217 currency code (e.g. USD, EUR). New screens start at 1 USD.',
   },
 }
 
@@ -83,15 +84,13 @@ function optionsFor(field, createMode) {
   return FIELD_OPTIONS[field]
 }
 
-// Missing required fields, out-of-range ones and a half-set price pair are all reported as red
-// inputs, but they read differently to a user, so the message names which happened. The pair gets
-// its own sentence because neither CPM nor Currency Code is asterisked.
+// Missing required fields and out-of-range ones are both reported as red inputs, but they read
+// differently to a user, so the message names which happened.
 function validationMessage(errors) {
   const parts = []
   if (Object.values(errors).some(reason => reason === true)) parts.push('Please fill in all required fields (marked with *).')
   const outOfRange = Object.keys(errors).filter(field => errors[field] === 'range')
   if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±${LAT_BOUNDS[1]}, longitude within ±${LON_BOUNDS[1]}, player id at most ${MAX_PLAYER_ID_LENGTH} characters, street at most ${MAX_STREET_LENGTH} characters, street number at most ${MAX_STREET_NUMBER_LENGTH} characters, CPM above 0.`)
-  if (Object.values(errors).includes('pair')) parts.push('CPM and Currency Code must be set together, or both left empty (stores 1 USD).')
   return parts.join(' ')
 }
 
@@ -430,10 +429,6 @@ export default function PlacementDetail() {
   // reason: lat/lon/player_id/street/street_number/cpm carry bean-validation bounds that fail that
   // identical unattributable way, so this form decides them from data already in hand rather than
   // sending a value that comes back as a 400 naming no screen.
-  //
-  // `missingCurrencyPair` marks the blank half of a half-set CPM / Currency Code pair, which
-  // upstream rejects (`placement.dooh.cpm.required` / `placement.dooh.cpm.currency.required`);
-  // both blank is valid and stores 1 USD (SSP-1133).
   function validateFields(values) {
     const errors = {}
     for (const field of REQUIRED_FIELDS) {
@@ -442,7 +437,6 @@ export default function PlacementDetail() {
     for (const field of outOfRangeFields(values)) errors[field] = 'range'
     // stricter than the bean bound above, which only catches a negative CPM — see `nonPositiveCpm`
     if (nonPositiveCpm(values)) errors.cpm = 'range'
-    for (const field of missingCurrencyPair(values)) errors[field] = 'pair'
     return errors
   }
 
@@ -519,8 +513,8 @@ export default function PlacementDetail() {
       setSelected(prev => prev.has(updated.id) ? new Map(prev).set(updated.id, updated) : prev)
       setSelectedScreen(updated)
       setEditMode(false)
-      // refetch, since upstream may have stored a price these submitted values do not show:
-      // clearing both CPM and currency stores 1 USD (SSP-1133). The grid refetches its page; the
+      // refetch, since upstream may store values these submitted ones do not show (it renders
+      // status lower-case, for one). The grid refetches its page; the
       // open modal and the selection snapshot re-read the stored row, which may be off that page.
       setScreensTick(t => t + 1)
       // non-fatal: the save already succeeded, so a failed re-read just leaves the submitted values

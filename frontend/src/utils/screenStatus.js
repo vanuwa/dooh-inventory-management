@@ -111,8 +111,8 @@ export function missingRequiredFields(screen) {
 // string (a stored value is kept). The pair is decidable from data already in hand, so decide
 // it here rather than in a 400. The name reported is the half that is absent.
 // Since SSP-1133 a write without the pair stores 1 USD and the backfill gave every screen both
-// halves, so on the soft-delete path this guards only legacy rows the backfill has not reached;
-// the edit form runs it too, where a half-set pair is still easy to type.
+// halves, so on the soft-delete path this guards only legacy rows the backfill has not reached.
+// (The edit form needs no pair check: it makes both fields required.)
 export function missingCurrencyPair(screen) {
   const hasCpm = !isBlank(screen?.cpm)
   const hasCurrency = !isBlank(screen?.currency_code)
