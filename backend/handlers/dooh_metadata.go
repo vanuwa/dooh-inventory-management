@@ -22,6 +22,11 @@ type doohMetadataResponse struct {
 	HasMore bool              `json:"has_more"`
 }
 
+// DoohMetadataMaxLimit caps the page size. Upstream caps limit at 10000 and we ask for limit+1
+// below, so 9999 keeps the sentinel within it. Mirrored by the largest PAGE_SIZES entry in
+// frontend/src/pages/DoohMetadata.jsx.
+const DoohMetadataMaxLimit = 9999
+
 type DoohMetadataHandler struct {
 	cfg *config.Config
 }
@@ -39,9 +44,8 @@ func (h *DoohMetadataHandler) DoohMetadata(w http.ResponseWriter, r *http.Reques
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
 		limit = n
 	}
-	// Upstream caps limit at 10000 and we ask for limit+1 below, so 9999 keeps the sentinel within it.
-	if limit > 9999 {
-		limit = 9999
+	if limit > DoohMetadataMaxLimit {
+		limit = DoohMetadataMaxLimit
 	}
 	offset := (page - 1) * limit
 

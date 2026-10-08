@@ -8,19 +8,19 @@
 // Visibility rule for the file: every named rule helper is exported and tested directly,
 // so which round a rule landed in is not visible in the export surface.
 import { ACTIVE_BADGE_COLORS, INACTIVE_BADGE_COLORS } from '../constants/statusColors.js'
+import { isBlank } from './format.js'
 
 // Upstream's third status, spelled once: it is a filter option, a badge key, the value the
 // soft delete writes and the option the create dialog removes.
 export const DELETED_STATUS = 'deleted'
 
-// `null`, `undefined`, `''` and whitespace-only all count as blank. Trimmed, because five of
+// `isBlank` counts `null`, `undefined`, `''` and whitespace-only as blank. Trimmed, because five of
 // the ten required fields — player_id, venue_type_tax, country_code, city, allowed_content —
 // are `@NotBlank` upstream, which rejects `"   "` as well. That rejection is bean validation:
 // a 400 reported on the bare property name, with no `dooh_settings[i]` index even in a
 // multi-row batch, so `labelBatchErrors` cannot tie it to a screen — exactly the
-// unattributable failure the pre-checks exist to prevent. `softDeleteBody`'s filter deliberately does NOT use this; see
-// the note at its call site.
-const isBlank = value => value == null || String(value).trim() === ''
+// unattributable failure the pre-checks exist to prevent. `softDeleteBody`'s filter
+// deliberately does NOT use this; see the note at its call site.
 
 // The Screens status filter, in display order.
 //
@@ -110,6 +110,9 @@ export function missingRequiredFields(screen) {
 // upstream NULL arrives as null and softDeleteBody drops it) while `currency_code` is a plain
 // string (a stored value is kept). The pair is decidable from data already in hand, so decide
 // it here rather than in a 400. The name reported is the half that is absent.
+// Since SSP-1133 a write without the pair stores 1 USD and the backfill gave every screen both
+// halves, so on the soft-delete path this guards only legacy rows the backfill has not reached;
+// the edit form runs it too, where a half-set pair is still easy to type.
 export function missingCurrencyPair(screen) {
   const hasCpm = !isBlank(screen?.cpm)
   const hasCurrency = !isBlank(screen?.currency_code)
@@ -133,21 +136,24 @@ export function missingCurrencyPair(screen) {
 //   street         @Size(max = MAX_STREET_LENGTH)         1024 (SSP-1134)
 //   street_number  @Size(max = MAX_STREET_NUMBER_LENGTH)  32   (SSP-1134)
 //
-// Rows that violate them are not hypothetical: `BulkUploadPlacementDoohDtoBase` carries no
-// bean-validation annotations at all, so an xlsx-written row predating SSP-1117's shared
+// Rows that violate the first four are not hypothetical: `BulkUploadPlacementDoohDtoBase` carries
+// no bean-validation annotations at all, so an xlsx-written row predating SSP-1117's shared
 // `validateSharedRules` can hold an out-of-range coordinate, a negative cpm or an over-length
 // player_id. One such row takes the whole PUT down, so — like the currency pair — decide it here
-// from data already in hand rather than in an unattributable 400.
+// from data already in hand rather than in an unattributable 400. The street bounds equal the
+// column widths, so a stored row cannot exceed them; those two only matter in the edit form.
 //
 // Only *present* values are tested: an absent lat/lon/player_id is `missingRequiredFields`'s call,
-// and an absent cpm, street or street_number is legal. A non-numeric value fails the bounds test and is reported here too —
-// the Go proxy types all three as numbers, so it cannot occur, and upstream's Jackson would reject
-// it just as flatly.
-const MAX_PLAYER_ID_LENGTH = 255
-const LAT_BOUNDS = [-90, 90]
-const LON_BOUNDS = [-180, 180]
-const MAX_STREET_LENGTH = 1024
-const MAX_STREET_NUMBER_LENGTH = 32
+// and an absent cpm, street or street_number is legal. A non-numeric lat, lon or cpm fails the
+// bounds test and is reported here too — the Go proxy types those three as numbers, so it cannot
+// occur, and upstream's Jackson would reject it just as flatly.
+//
+// Exported so the edit form's validation message quotes these values rather than a copy.
+export const MAX_PLAYER_ID_LENGTH = 255
+export const LAT_BOUNDS = [-90, 90]
+export const LON_BOUNDS = [-180, 180]
+export const MAX_STREET_LENGTH = 1024
+export const MAX_STREET_NUMBER_LENGTH = 32
 
 export function outOfRangeFields(screen) {
   const outOfRange = []
@@ -159,6 +165,14 @@ export function outOfRangeFields(screen) {
   if (String(screen?.street ?? '').length > MAX_STREET_LENGTH) outOfRange.push('street')
   if (String(screen?.street_number ?? '').length > MAX_STREET_NUMBER_LENGTH) outOfRange.push('street_number')
   return outOfRange
+}
+
+// The bean bound above only catches a negative CPM; upstream's `validatePositive` rejects 0 as
+// well (`placement.dooh.field.positive`). That error is indexed, so attributable, and the SSP-1133
+// backfill left no cpm-0 rows for the soft delete to carry — so only the edit form runs this, to
+// mark the field before sending. A blank CPM is legal and is not flagged.
+export function nonPositiveCpm(screen) {
+  return !isBlank(screen?.cpm) && Number(screen.cpm) <= 0
 }
 
 // Splits a selection into the rows the soft delete can carry and the rows it cannot. A row in

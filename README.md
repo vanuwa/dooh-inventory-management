@@ -30,6 +30,7 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
 - Placement detail page with two tabs (URL-reflected):
   - **Screens** — server-side paginated grid with a status filter (All, Active only, Inactive only, Deleted only); click any row to open a view/edit modal with full screen details; download all screens as CSV; a **Select** mode turns on a checkbox column so screens can be picked across pages/searches (up to 1000 per delete — the selection stops there and says so) and deleted in bulk via a confirmation dialog. Deleting is a **soft delete** by default: the screens are marked `deleted`, drop out of the default view and off the **DOOH Metadata** page, and can be restored by setting their status back to Active from the edit modal. A **Permanently delete instead** checkbox in the dialog switches to the old irreversible purge (admin-only — see Prerequisites). A screen whose record is missing — or holds an out-of-range value for — one of the fields the SSP requires on every update is flagged in the dialog with the offending field named, and cannot be soft-deleted at all: untick it and confirm the rest, or repair the field first through the edit modal. **Permanent delete is not the way round this** — it purges every screen that is ticked, not just the flagged ones, and that cannot be undone. Note that **All** shows active and inactive screens but not deleted ones; deleted screens are listed under **Deleted only**. A soft-deleted screen is still exported to the ad server, and so can still serve, until IC-2854 ships
   - **Reporting** — generate and download a CSV performance report for the placement
+- **DOOH Metadata** (`/dooh-metadata`) — every non-deleted screen across publishers from the SSP's demand-partner feed, filterable by country code and publisher ID, as a table (status, publisher, placement, country, address, venue type/taxonomy, CPM, …) or a clustered map (up to 2000 screens)
 - Automatic token refresh — handled client-side via response headers, sessions stay alive without re-login
 - Switch between the production and acceptance SSP instances from the header (or on the login page) without a rebuild — each environment keeps its own session, so both stay logged in (see [API environments](#api-environments))
 
@@ -59,10 +60,11 @@ Publishers  →  Publisher detail + Placements  →  Placement detail + Screens 
   with a normal account.
 - **Who can now take screens out of the auction.** The default soft delete is an ordinary screen edit
   (`PUT`, allowed for the `ADMINISTRATOR` *and* `PUBLISHER` modules), so any account that can edit a
-  screen can now mark up to 1000 of them `deleted` in one confirmation — stopping them serving —
-  where bulk removal previously required an `ADMINISTRATOR` account plus a gateway `DELETE` grant. It
-  is reversible (set the status back to Active) and upstream sanctions it, but it is a wider
-  permission surface than the old delete, so grant screen-edit rights accordingly.
+  screen can now mark up to 1000 of them `deleted` in one confirmation — taking them out of the
+  auction once IC-2854 ships — where bulk removal previously required an `ADMINISTRATOR` account
+  plus a gateway `DELETE` grant. It is reversible (set the status back to Active) and upstream
+  sanctions it, but it is a wider permission surface than the old delete, so grant screen-edit
+  rights accordingly.
 
 ### 1. Create a `.env` file
 

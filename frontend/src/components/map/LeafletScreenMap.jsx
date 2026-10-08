@@ -59,8 +59,8 @@ export default function LeafletScreenMap({ markers, loadId, height }) {
       <FitBounds points={markers} />
       <ResizeHandler trigger={height} />
       <MarkerClusterGroup key={loadId} chunkedLoading>
-        {markers.map((m, i) => (
-          <Marker key={m.id ?? `idx-${i}`} position={[m.lat, m.lon]}>
+        {markers.map(m => (
+          <Marker key={m.id} position={[m.lat, m.lon]}>
             <Popup>
               <ScreenPopupContent screen={m} />
             </Popup>

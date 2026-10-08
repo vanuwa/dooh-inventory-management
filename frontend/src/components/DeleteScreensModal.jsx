@@ -3,7 +3,7 @@ import { apiFetch } from '../api.js'
 import ScreenStatusBadge from './ScreenStatusBadge.jsx'
 import { modalStyles } from './CreateUserModal.jsx'
 import { tableStyles } from '../styles/tables.js'
-import { fmtPublisher } from '../utils/format.js'
+import { fmtNamedId } from '../utils/format.js'
 import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
 import { deleteRequest, partitionSoftDeletable } from '../utils/screenStatus.js'
 
@@ -21,7 +21,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
   const rows = useMemo(() => screens.filter(sc => checked.has(sc.id)), [screens, checked])
 
   // The soft delete is a full-row PUT, and upstream rejects a row that cannot supply every
-  // required field — or supplies one out of range — as an unattributable 400 or a raw 500,
+  // required field — or supplies one out of range — as a 400 on the bare property name,
   // naming no screen. Catch those rows here instead, while their ids are still in hand. The
   // way out is unticking them: the permanent delete validates nothing, but it purges the
   // *whole* ticked selection, so it is never the remedy for a few blocked rows.
@@ -95,7 +95,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
         <p style={s.warning}>
           {hardDelete
             ? 'This permanently deletes the screens below. This cannot be undone.'
-            : 'This marks the screens below as deleted. They stop serving and drop out of every filter except Deleted only — and can be restored by setting the status back to active. It is sent as a full-row update built from the values each screen had when it was ticked, so any edit made to these screens elsewhere since then is overwritten.'}
+            : 'This marks the screens below as deleted. They drop out of every filter except Deleted only and off the DOOH Metadata page, and can be restored by setting the status back to active. Until the ad-server change IC-2854 ships they are still exported and can still serve. It is sent as a full-row update built from the values each screen had when it was ticked, so any edit made to these screens elsewhere since then is overwritten.'}
         </p>
 
         <div style={s.modalBody} ref={bodyRef}>
@@ -146,7 +146,7 @@ export default function DeleteScreensModal({ screens, publisherId, placementId, 
                   <td style={s.td}>{sc.player_id || '—'}</td>
                   <td style={s.td}><ScreenStatusBadge status={sc.status} /></td>
                   <td style={s.td}>{sc.placement_id || '—'}</td>
-                  <td style={s.td}>{fmtPublisher(sc.publisher_id, publisherName)}</td>
+                  <td style={s.td}>{fmtNamedId(publisherName, sc.publisher_id)}</td>
                   <td style={s.td}>{sc.country_code || '—'}</td>
                 </tr>
               ))}

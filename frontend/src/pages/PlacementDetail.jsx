@@ -13,8 +13,11 @@ import { tabStyles } from '../styles/tabs.js'
 import { tableStyles } from '../styles/tables.js'
 import { useDebounce } from '../hooks/useDebounce.js'
 import { formatApiError, labelBatchErrors } from '../utils/formatApiError.js'
-import { fmtStreet } from '../utils/format.js'
-import { SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields, missingCurrencyPair } from '../utils/screenStatus.js'
+import { fmtStreet, isBlank } from '../utils/format.js'
+import {
+  SCREEN_STATUS_OPTIONS, DEFAULT_SCREEN_STATUS_FILTER, DELETED_STATUS, PATH_OWNED_KEYS, screensQuery, outOfRangeFields, missingCurrencyPair, nonPositiveCpm,
+  MAX_PLAYER_ID_LENGTH, LAT_BOUNDS, LON_BOUNDS, MAX_STREET_LENGTH, MAX_STREET_NUMBER_LENGTH,
+} from '../utils/screenStatus.js'
 
 const SCREEN_FIELDS = [
   ['ID',                  'id',                 false, undefined, false],
@@ -42,19 +45,14 @@ const SCREEN_FIELDS = [
   ['Min Duration (s)',    'min_duration',        true,  'number', false],
   ['Max Duration (s)',    'max_duration',        true,  'number', false],
   ['Avg Weekly Audience', 'avg_weekly_audience', true,  'number', false],
-  ['CPM',                 'cpm',                 true,  'number', false, 'cpm'],
-  ['Currency Code',       'currency_code',       true,  'text',   false, 'currencyCode'],
+  ['CPM',                 'cpm',                 true,  'number', false, 'pricePair'],
+  ['Currency Code',       'currency_code',       true,  'text',   false, 'pricePair'],
   ['Allowed Content',     'allowed_content',     true,  'text',   true],
 ]
 
 const REQUIRED_FIELDS = new Set(
   SCREEN_FIELDS.filter(([,,,, req]) => req).map(([, key]) => key)
 )
-
-// SSP-1133: upstream stores cpm 1 / USD when a write carries neither half of the pair
-const PRICE_PAIR_HELP = {
-  text: 'Set both or neither — leaving both empty stores 1 USD.',
-}
 
 const FIELD_HELP = {
   venueTypeId: {
@@ -65,10 +63,10 @@ const FIELD_HELP = {
   countryCode: {
     text: 'Country code using ISO 3166-1 alpha-2 standard (e.g., US, FR, CN).',
   },
-  // two keys for one text, because `helpOpen` is keyed by help key and a shared key would open
-  // both popovers at once
-  cpm: PRICE_PAIR_HELP,
-  currencyCode: PRICE_PAIR_HELP,
+  // SSP-1133: upstream stores cpm 1 / USD when a write carries neither half of the pair
+  pricePair: {
+    text: 'Set both or neither — leaving both empty stores 1 USD.',
+  },
 }
 
 const FIELD_OPTIONS = {
@@ -92,7 +90,7 @@ function validationMessage(errors) {
   const parts = []
   if (Object.values(errors).some(reason => reason === true)) parts.push('Please fill in all required fields (marked with *).')
   const outOfRange = Object.keys(errors).filter(field => errors[field] === 'range')
-  if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±90, longitude within ±180, player id at most 255 characters, street at most 1024 characters, street number at most 32 characters, CPM not negative.`)
+  if (outOfRange.length > 0) parts.push(`Out of range: ${outOfRange.join(', ')} — latitude within ±${LAT_BOUNDS[1]}, longitude within ±${LON_BOUNDS[1]}, player id at most ${MAX_PLAYER_ID_LENGTH} characters, street at most ${MAX_STREET_LENGTH} characters, street number at most ${MAX_STREET_NUMBER_LENGTH} characters, CPM above 0.`)
   if (Object.values(errors).includes('pair')) parts.push('CPM and Currency Code must be set together, or both left empty (stores 1 USD).')
   return parts.join(' ')
 }
@@ -247,7 +245,7 @@ export default function PlacementDetail() {
       return
     }
     autoOpenAttemptedRef.current = true
-    apiFetch(`/publishers/${publisherId}/placements/${placementId}/dooh-settings/${initialScreenId}`)
+    apiFetch(screenPath(initialScreenId))
       .then(res => {
         if (!res.ok) { autoOpenAttemptedRef.current = false; return null }
         return res.json()
@@ -264,6 +262,10 @@ export default function PlacementDetail() {
   function screensPath(forPage, forLimit) {
     return `/publishers/${publisherId}/placements/${placementId}/dooh-settings` +
       screensQuery({ page: forPage, limit: forLimit, search: committedSearch, status: statusFilter })
+  }
+
+  function screenPath(id) {
+    return `/publishers/${publisherId}/placements/${placementId}/dooh-settings/${id}`
   }
 
   useEffect(() => {
@@ -435,10 +437,11 @@ export default function PlacementDetail() {
   function validateFields(values) {
     const errors = {}
     for (const field of REQUIRED_FIELDS) {
-      const v = values[field]
-      if (v == null || String(v).trim() === '') errors[field] = true
+      if (isBlank(values[field])) errors[field] = true
     }
     for (const field of outOfRangeFields(values)) errors[field] = 'range'
+    // stricter than the bean bound above, which only catches a negative CPM — see `nonPositiveCpm`
+    if (nonPositiveCpm(values)) errors.cpm = 'range'
     for (const field of missingCurrencyPair(values)) errors[field] = 'pair'
     return errors
   }
@@ -517,8 +520,18 @@ export default function PlacementDetail() {
       setSelectedScreen(updated)
       setEditMode(false)
       // refetch, since upstream may have stored a price these submitted values do not show:
-      // clearing both CPM and currency stores 1 USD (SSP-1133)
+      // clearing both CPM and currency stores 1 USD (SSP-1133). The grid refetches its page; the
+      // open modal and the selection snapshot re-read the stored row, which may be off that page.
       setScreensTick(t => t + 1)
+      // non-fatal: the save already succeeded, so a failed re-read just leaves the submitted values
+      try {
+        const reread = await apiFetch(screenPath(updated.id))
+        const stored = reread.ok ? (await reread.json())?.dooh_setting : null
+        if (stored) {
+          setSelectedScreen(prev => (prev?.id === stored.id ? stored : prev))
+          setSelected(prev => (prev.has(stored.id) ? new Map(prev).set(stored.id, stored) : prev))
+        }
+      } catch { /* keep the submitted values */ }
     } catch (err) {
       if (err.message !== 'Unauthorized') setSaveError('Save failed.')
     } finally {
@@ -811,9 +824,9 @@ export default function PlacementDetail() {
                               <span style={{ position: 'relative', display: 'inline-block', marginLeft: 4 }}>
                                 <button
                                   style={s.helpIcon}
-                                  onClick={e => { e.stopPropagation(); setHelpOpen(helpOpen === helpKey ? null : helpKey) }}
+                                  onClick={e => { e.stopPropagation(); setHelpOpen(helpOpen === field ? null : field) }}
                                 >?</button>
-                                {helpOpen === helpKey && (
+                                {helpOpen === field && (
                                   <div style={s.helpPopover}>
                                     <p style={{ margin: 0 }}>{FIELD_HELP[helpKey].text}</p>
                                     {FIELD_HELP[helpKey].link && (

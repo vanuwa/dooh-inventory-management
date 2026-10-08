@@ -11,6 +11,7 @@ import {
   deleteRequest,
   missingCurrencyPair,
   outOfRangeFields,
+  nonPositiveCpm,
   DELETED_STATUS,
 } from './screenStatus.js'
 
@@ -337,6 +338,16 @@ describe('missingCurrencyPair', () => {
   it('treats a whitespace-only currency_code as absent', () => {
     expect(missingCurrencyPair(fixtureScreen({ cpm: 2.5, currency_code: '   ' }))).toEqual(['currency_code'])
   })
+
+  // the edit form calls it too, with the strings its inputs hold
+  it('counts cpm 0 as set, never by truthiness', () => {
+    expect(missingCurrencyPair({ cpm: 0, currency_code: '' })).toEqual(['currency_code'])
+  })
+
+  it('accepts the form shapes: both empty strings, and the create default', () => {
+    expect(missingCurrencyPair({ cpm: '', currency_code: '' })).toEqual([])
+    expect(missingCurrencyPair({ cpm: 1, currency_code: 'USD' })).toEqual([])
+  })
 })
 
 // Exported in its own right because the single-screen edit dialog runs it too: the same six
@@ -394,6 +405,29 @@ describe('outOfRangeFields', () => {
   it('ignores an absent or blank value — that is missingRequiredFields\' call', () => {
     expect(outOfRangeFields({})).toEqual([])
     expect(outOfRangeFields({ lat: '', lon: null, cpm: '   ' })).toEqual([])
+  })
+})
+
+// The edit form's stricter CPM rule: upstream's `validatePositive` rejects 0, which the
+// inclusive bean bound in outOfRangeFields lets through.
+describe('nonPositiveCpm', () => {
+  it('flags zero and negative prices, as numbers or as the strings the form holds', () => {
+    expect(nonPositiveCpm({ cpm: 0 })).toBe(true)
+    expect(nonPositiveCpm({ cpm: '0' })).toBe(true)
+    expect(nonPositiveCpm({ cpm: -1 })).toBe(true)
+    expect(nonPositiveCpm({ cpm: '-0.5' })).toBe(true)
+  })
+
+  it('accepts a positive price', () => {
+    expect(nonPositiveCpm({ cpm: 0.01 })).toBe(false)
+    expect(nonPositiveCpm({ cpm: '1' })).toBe(false)
+  })
+
+  it('ignores an absent or blank price — leaving it empty is legal', () => {
+    expect(nonPositiveCpm({})).toBe(false)
+    expect(nonPositiveCpm({ cpm: null })).toBe(false)
+    expect(nonPositiveCpm({ cpm: '' })).toBe(false)
+    expect(nonPositiveCpm({ cpm: '   ' })).toBe(false)
   })
 })
 

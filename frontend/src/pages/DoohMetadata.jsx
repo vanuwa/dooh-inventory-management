@@ -5,7 +5,7 @@ import Layout from '../components/Layout.jsx'
 import { tableStyles as ts } from '../styles/tables.js'
 import { tabStyles } from '../styles/tabs.js'
 import { useDebounce } from '../hooks/useDebounce.js'
-import { fmtNamedId, fmtNameOrId, fmtPublisher, fmtStreet } from '../utils/format.js'
+import { fmtNamedId, fmtNameOrId, fmtStreet } from '../utils/format.js'
 import ScreenStatusBadge from '../components/ScreenStatusBadge.jsx'
 import { MAP_PROVIDER_IDS, DEFAULT_MAP_PROVIDER, GOOGLE_MAPS_AVAILABLE } from '../constants/mapConfig.js'
 
@@ -13,13 +13,22 @@ import { MAP_PROVIDER_IDS, DEFAULT_MAP_PROVIDER, GOOGLE_MAPS_AVAILABLE } from '.
 // download when the Map tab is opened.
 const ScreenMap = lazy(() => import('../components/ScreenMap.jsx'))
 
-const PAGE_SIZES = [10, 20, 50, 100, 500, 1000, 2000, 5000, 10000]
+// 9999, not 10000: the proxy caps limit there (`DoohMetadataMaxLimit`; it asks upstream for limit+1, which clamps at 10000)
+const PAGE_SIZES = [10, 20, 50, 100, 500, 1000, 2000, 5000, 9999]
 const MAP_PROVIDER_STORAGE_KEY = 'dooh-metadata-map-provider'
 
+// 10000 was the largest size before the cap moved to 9999; a bookmark or stored choice still
+// carrying it keeps the largest page instead of falling back to the default.
+const LEGACY_MAX_PAGE_SIZE = 10000
+
+function knownLimit(n) {
+  return n === LEGACY_MAX_PAGE_SIZE ? PAGE_SIZES[PAGE_SIZES.length - 1] : n
+}
+
 function limitFromParams(searchParams) {
-  const fromUrl = Number(searchParams.get('limit'))
+  const fromUrl = knownLimit(Number(searchParams.get('limit')))
   if (PAGE_SIZES.includes(fromUrl)) return fromUrl
-  const fromStorage = Number(localStorage.getItem('dooh-metadata-page-size'))
+  const fromStorage = knownLimit(Number(localStorage.getItem('dooh-metadata-page-size')))
   return PAGE_SIZES.includes(fromStorage) ? fromStorage : 20
 }
 
@@ -227,12 +236,12 @@ export default function DoohMetadata() {
               <tbody>
                 {items.map((item, i) => (
                   // `id` is the row's own key; `screen_id` is only unique within a placement.
-                  <tr key={item.id ?? `idx-${i}`} style={i % 2 !== 0 ? ts.rowAlt : undefined}>
+                  <tr key={item.id} style={i % 2 !== 0 ? ts.rowAlt : undefined}>
                     <td style={ts.tdCompact}>{fmt(item.screen_id)}</td>
                     <td style={ts.tdCompact}><ScreenStatusBadge status={item.status} /></td>
-                    <td style={ts.tdCompact}>{fmtPublisher(item.publisher_id, item.publisher_name)}</td>
-                    <td style={ts.tdCompact}>{fmtNamedId(item.placement_id, item.placement_name)}</td>
-                    <td style={ts.tdCompact}>{fmtNamedId(item.country_code, item.country_name)}</td>
+                    <td style={ts.tdCompact}>{fmtNamedId(item.publisher_name, item.publisher_id)}</td>
+                    <td style={ts.tdCompact}>{fmtNamedId(item.placement_name, item.placement_id)}</td>
+                    <td style={ts.tdCompact}>{fmtNamedId(item.country_name, item.country_code)}</td>
                     <td style={ts.tdCompact}>{fmt(item.city)}</td>
                     <td style={ts.tdCompact}>{fmt(item.region)}</td>
                     <td style={ts.tdCompact}>{fmt(item.zip)}</td>

@@ -1,4 +1,4 @@
-import { fmtNameOrId, fmtPublisher, fmtStreet } from '../../utils/format.js'
+import { fmtNamedId, fmtNameOrId, fmtStreet } from '../../utils/format.js'
 
 // Popup/InfoWindow body for a single screen, shared by both map providers so the
 // two render identical details.
@@ -7,7 +7,7 @@ export default function ScreenPopupContent({ screen }) {
     <div style={s.popup}>
       <div style={s.popupTitle}>Screen {screen.screen_id || '—'}</div>
       <div>
-        <strong>Publisher:</strong> {fmtPublisher(screen.publisher_id, screen.publisher_name)}
+        <strong>Publisher:</strong> {fmtNamedId(screen.publisher_name, screen.publisher_id)}
       </div>
       <div><strong>Address:</strong> {fmtStreet(screen.street, screen.street_number)}</div>
       <div>

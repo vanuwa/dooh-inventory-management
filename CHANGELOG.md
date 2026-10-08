@@ -6,13 +6,15 @@
 - The **DOOH Metadata** page and its map now read the SSP's new demand-partners feed (`/demand-partner/v1/dooh-metadata`); the admin endpoint they used was removed upstream with no deprecation window, which had left both broken
 - The **Publisher** filter on the DOOH Metadata page narrows the rows again — upstream stopped accepting the old filter name and silently returned the unfiltered feed — and the **Country** filter now actually filters, which it never did before
 - The screen **Address** field is replaced by **Street** and **Street No.** in the create/edit form, the Screens grid's Address column and the CSV export, following the SSP's split of the address. Screens created before the split carry their whole old address under Street with an empty Street No.
-- The DOOH Metadata table gained **Status**, **Placement** and **Address** columns; Country, Venue Type and Venue Taxonomy show names instead of bare ids, and the map popup gained the address and the venue type name
+- The DOOH Metadata table gained **Status**, **Placement** and **Address** columns; Country shows its name beside the code, and Venue Type and Venue Taxonomy show names instead of bare ids; the map popup gained the address and the venue type name
 - The Create Screen form now pre-fills CPM `1` and Currency Code `USD`, the price the SSP stores when both are left empty, instead of a lone `EUR` that the SSP rejected. CPM and Currency Code must be set together or both left empty; setting only one marks the other red before anything is sent
 
-### Fixes
+### Bug Fixes
 - A soft delete and the single-screen **Save** no longer wipe a screen's street: both send the whole row back, and the street fields had been dropped on the way in
-- **Has more** on the DOOH Metadata page is now correct at the 10000 page size, where it was always off
-- After a Save the Screens grid refetches, so a price the SSP defaulted to 1 USD shows without a manual refresh
+- The largest DOOH Metadata page size is now **9999** rows instead of 10000, which keeps **Has more** correct there — at 10000 it was always off
+- After a Save the Screens grid refetches and the open screen modal re-reads the stored screen, so a price the SSP defaulted to 1 USD shows in both without a manual refresh
+- The screen edit form flags a CPM of `0` before saving — the SSP requires a price above 0 — instead of sending it and failing
+- The soft-delete confirmation no longer says deleted screens stop serving: until the SSP's ad-server change (IC-2854) ships they are still exported and can still serve
 - Resolved the 2026-09-24 known limitation: soft-deleted screens no longer appear on the **DOOH Metadata** page or its map
 
 ## 2026-09-24
