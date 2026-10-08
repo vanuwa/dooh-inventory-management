@@ -971,7 +971,7 @@ const s = {
   cancelBtn: { padding: '0.4375rem 1.25rem', background: '#fff', color: '#1a1a2e', border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: '0.875rem' },
   saveError: { color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.5rem', flexShrink: 0, whiteSpace: 'pre-line' },
   helpIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', border: '1px solid #aaa', fontSize: 10, cursor: 'pointer', background: '#f0f2f5', padding: 0, verticalAlign: 'middle', lineHeight: 1 },
-  helpPopover: { position: 'absolute', zIndex: 100, background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '8px 10px', width: 260, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', top: 22, left: 0, fontSize: '0.8125rem', lineHeight: 1.4 },
+  helpPopover: { position: 'absolute', zIndex: 100, background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '8px 10px', width: 260, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', top: 22, left: 0, fontSize: '0.8125rem', lineHeight: 1.4, whiteSpace: 'normal' },
 }
 
 const s_editInputError = { ...s.editInput, borderColor: '#e53e3e', outline: '1px solid #e53e3e' }
