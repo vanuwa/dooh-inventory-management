@@ -79,6 +79,11 @@ const FIELD_OPTIONS = {
 // the next POST of a soft-deleted player_id as a duplicate
 const CREATE_STATUS_OPTIONS = FIELD_OPTIONS.status.filter(opt => opt !== DELETED_STATUS)
 
+// not offered by the create/edit forms: upstream derives orientation from the resolution, and
+// device_id is not edited here. Both still show in the grid and the view modal, and a Save keeps
+// their stored values, because editValues starts as a copy of the whole screen
+const FORM_HIDDEN_FIELDS = new Set(['orientation', 'device_id'])
+
 function optionsFor(field, createMode) {
   if (field === 'status' && createMode) return CREATE_STATUS_OPTIONS
   return FIELD_OPTIONS[field]
@@ -809,7 +814,7 @@ export default function PlacementDetail() {
               <div style={s.modalBodyScroll}>
                 <table style={s.modalTable}>
                   <tbody>
-                    {SCREEN_FIELDS.map(([label, field, editable, inputType, required, helpKey]) => (
+                    {SCREEN_FIELDS.filter(([, field]) => !(isFormActive && FORM_HIDDEN_FIELDS.has(field))).map(([label, field, editable, inputType, required, helpKey]) => (
                         <tr key={field} style={s.modalRow}>
                           <td style={s.modalLabel}>
                             {label}

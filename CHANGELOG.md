@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-09
+
+### Features
+- The screen create and edit forms no longer ask for **Orientation** or **Device ID**. Orientation is now worked out automatically from the screen's resolution. Both values still appear in the Screens list, the screen details and the CSV download, and editing a screen keeps whatever they already held
+
 ## 2026-10-08
 
 ### Features
